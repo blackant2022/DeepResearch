@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# IDE / 工具
+.idea/
+.cursor/
+.vscode/
+.pytest_cache/
+
+# 向量库 & 检查点（本地生成，不入库）
+data/chroma/*
+data/ltm_chroma/*
+data/checkpoints/*
+!data/**/.gitkeep
+
+# 用户上传的文献（体积大，不入库；请自行放入 data/docs）
+data/docs/*
+!data/docs/.gitkeep
+
+# 二进制 / 缓存
+*.bin
+*.sqlite3
+.cache/
+fastembed_cache/

@@ -1,0 +1,33 @@
+# ============================================================
+# DeepResearch Multi-Agent System — 依赖清单
+# 版本对齐用户 2026 环境（langgraph 1.x / openai 2.x / pydantic 2.x）
+# 不锁死补丁号，用 >= 保证与本机已装版本兼容
+# ============================================================
+
+# ---- LangGraph 多Agent编排（核心） ----
+langgraph>=1.1.0
+langgraph-checkpoint>=4.0.0
+
+# ---- LLM 调用：直连 DeepSeek（openai 兼容协议） ----
+openai>=2.0.0
+
+# ---- 向量库 & 嵌入（RAG + 长期记忆） ----
+chromadb>=1.5.0
+fastembed>=0.4.0
+
+# ---- 文档解析 ----
+pypdf>=6.0.0
+python-docx>=1.1.0
+langchain-text-splitters>=1.0.0
+
+# ---- 配置 & 数据校验 ----
+pydantic>=2.10.0
+pydantic-settings>=2.10.0
+python-dotenv>=1.0.0
+
+# ---- 前端 ----
+streamlit>=1.50.0
+
+# ---- 工具 ----
+numpy>=2.0.0
+tenacity>=9.0.0
