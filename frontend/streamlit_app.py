@@ -188,36 +188,86 @@ div[data-testid="stButton"] > button:disabled {
     border-color: var(--color-destructive) !important;
 }
 
-/* ---- Chat ---- */
+/* ---- Chat：左助手 / 右用户 ---- */
 div[data-testid="stChatMessage"] {
-    background: transparent;
-    border: none;
-    padding: 0.25rem 0;
+    display: flex !important;
+    align-items: flex-start;
+    gap: 0.65rem;
+    background: transparent !important;
+    border: none !important;
+    padding: 0.35rem 0 !important;
+    width: 100% !important;
 }
 
-div[data-testid="stChatMessage"][data-testid*="user"],
+/* 助手：靠左 */
+div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {
+    flex-direction: row !important;
+    justify-content: flex-start !important;
+}
+
+div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div:nth-child(2) {
+    flex: 0 1 auto;
+    max-width: min(92%, 720px);
+}
+
+/* 用户：靠右 */
 div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
-    flex-direction: row-reverse;
+    flex-direction: row-reverse !important;
+    justify-content: flex-start !important;
+    margin-left: auto !important;
+    max-width: min(88%, 680px);
+    width: fit-content !important;
 }
 
+div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:nth-child(2) {
+    flex: 0 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+/* 气泡基础样式 */
 div[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: 0.85rem 1.1rem;
+    padding: 0.75rem 1rem;
     box-shadow: var(--shadow-sm);
     line-height: 1.65;
+    width: 100%;
 }
 
+/* 助手气泡：左下小圆角 */
+div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) [data-testid="stMarkdownContainer"] {
+    border-radius: 4px var(--radius-md) var(--radius-md) var(--radius-md);
+}
+
+/* 用户气泡：右下小圆角 + 主色 */
 div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stMarkdownContainer"] {
     background: var(--color-primary);
     color: var(--color-on-primary);
     border-color: var(--color-primary);
+    border-radius: var(--radius-md) var(--radius-md) 4px var(--radius-md);
 }
 
 div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stMarkdownContainer"] p,
-div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stMarkdownContainer"] li {
-    color: var(--color-on-primary);
+div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stMarkdownContainer"] li,
+div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stMarkdownContainer"] span {
+    color: var(--color-on-primary) !important;
+}
+
+/* 头像缩小 */
+div[data-testid="stChatMessage"] [data-testid="chatAvatarIcon-user"],
+div[data-testid="stChatMessage"] [data-testid="chatAvatarIcon-assistant"] {
+    min-width: 2rem;
+    width: 2rem;
+    height: 2rem;
+    font-size: 1rem;
+}
+
+/* 执行详情（助手侧） */
+div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) details[data-testid="stExpander"] {
+    margin-top: 0.5rem;
+    max-width: 100%;
 }
 
 [data-testid="stChatInput"] {
@@ -252,6 +302,23 @@ div[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-
 [data-testid="stChatInput"] button {
     background: var(--color-primary) !important;
     color: white !important;
+}
+
+/* 输入框内附件按钮与预览区 */
+[data-testid="stChatInput"] [data-testid="stChatInputFileUploadButton"] button {
+    background: transparent !important;
+    color: var(--color-muted-text) !important;
+    border: none !important;
+}
+
+[data-testid="stChatInput"] [data-testid="stChatInputFileUploadButton"] button:hover {
+    color: var(--color-secondary) !important;
+    background: var(--color-muted) !important;
+}
+
+[data-testid="stChatInputFileUploadDropzone"] {
+    border-color: var(--color-secondary) !important;
+    background: #EFF6FF !important;
 }
 
 /* ---- File uploader ---- */
@@ -359,45 +426,54 @@ details[data-testid="stExpander"] summary {
 }
 
 .dr-empty {
-    background: var(--color-surface);
+    position: relative;
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    padding: 2rem 1.5rem;
+    padding: 2.5rem 1.75rem 2rem;
     text-align: center;
     box-shadow: var(--shadow-sm);
-    margin: 1rem 0 1.5rem;
+    margin: 2rem 0 2.5rem;
+    overflow: hidden;
+}
+
+.dr-empty-glow {
+    position: absolute;
+    top: -40%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 280px;
+    height: 160px;
+    background: radial-gradient(ellipse, rgba(37, 99, 235, 0.08) 0%, transparent 70%);
+    pointer-events: none;
 }
 
 .dr-empty-icon {
-    width: 48px;
-    height: 48px;
-    margin: 0 auto 1rem;
-    border-radius: 50%;
-    background: var(--color-muted);
+    position: relative;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 1.25rem;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
     display: flex;
     align-items: center;
     justify-content: center;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
 }
 
 .dr-empty-icon svg {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     stroke: var(--color-secondary);
 }
 
 .dr-empty h3 {
     font-family: var(--font-heading);
-    font-size: 1.25rem;
+    font-size: 1.35rem;
     color: var(--color-foreground);
-    margin: 0 0 0.5rem;
+    margin: 0 0 1.25rem;
     font-weight: 600;
-}
-
-.dr-empty p {
-    color: var(--color-muted-text);
-    margin: 0;
-    font-size: 0.9rem;
-    line-height: 1.6;
+    letter-spacing: -0.01em;
 }
 
 .dr-tags {
@@ -405,26 +481,88 @@ details[data-testid="stExpander"] summary {
     flex-wrap: wrap;
     gap: 0.5rem;
     justify-content: center;
-    margin-top: 1.25rem;
+    margin-top: 0;
 }
 
 .dr-tag {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.3rem 0.75rem;
+    gap: 0.4rem;
+    padding: 0.4rem 0.9rem;
     border-radius: 999px;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     font-weight: 600;
-    background: var(--color-muted);
+    background: var(--color-surface);
     color: var(--color-muted-text);
     border: 1px solid var(--color-border);
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.dr-tag:hover {
+    border-color: #BFDBFE;
+    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.08);
+}
+
+.dr-tag-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-muted-text);
+    opacity: 0.5;
+    flex-shrink: 0;
 }
 
 .dr-tag-accent {
     background: #EFF6FF;
     color: var(--color-secondary);
     border-color: #BFDBFE;
+}
+
+.dr-tag-accent .dr-tag-dot {
+    background: var(--color-secondary);
+    opacity: 1;
+}
+
+.dr-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0.75rem;
+    align-items: center;
+}
+
+.dr-metric-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.dr-metric-primary.pass {
+    background: #ECFDF5;
+    border-color: #6EE7B7;
+    color: #047857;
+}
+
+.dr-metric-primary.warn {
+    background: #FFFBEB;
+    border-color: #FCD34D;
+    color: #B45309;
+}
+
+.dr-metric-chip {
+    display: inline-flex;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    color: var(--color-muted-text);
+    background: var(--color-muted);
+    border: 1px solid var(--color-border);
 }
 
 .dr-sidebar-label {
@@ -457,12 +595,13 @@ HEADER_HTML = """
     </div>
     <h1 class="dr-title">DeepResearch</h1>
   </div>
-  <p class="dr-subtitle">学术文献超级智能体 · 自动路由：日常对话 / ReAct 工具调用 / 深度研究</p>
+  <p class="dr-subtitle">学术文献超级智能体 · 智能路由</p>
 </div>
 """
 
 EMPTY_STATE_HTML = """
 <div class="dr-empty">
+  <div class="dr-empty-glow" aria-hidden="true"></div>
   <div class="dr-empty-icon" aria-hidden="true">
     <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" xmlns="http://www.w3.org/2000/svg">
       <path stroke-linecap="round" stroke-linejoin="round"
@@ -470,11 +609,10 @@ EMPTY_STATE_HTML = """
     </svg>
   </div>
   <h3>开始你的研究</h3>
-  <p>在左侧上传 PDF / Word / TXT 文献后提问，<br>也可以直接进行日常对话。</p>
   <div class="dr-tags">
-    <span class="dr-tag dr-tag-accent">文献检索</span>
-    <span class="dr-tag">深度研究</span>
-    <span class="dr-tag">日常对话</span>
+    <span class="dr-tag dr-tag-accent"><span class="dr-tag-dot"></span>文献检索</span>
+    <span class="dr-tag"><span class="dr-tag-dot"></span>深度研究</span>
+    <span class="dr-tag"><span class="dr-tag-dot"></span>日常对话</span>
   </div>
 </div>
 """
@@ -491,12 +629,14 @@ st.markdown(f"<style>{THEME_CSS}</style>", unsafe_allow_html=True)
 # ---- Session（最先初始化，避免刷新闪烁）----
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "thread_id" not in st.session_state:
-    st.session_state.thread_id = None
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 if "ingest_notice" not in st.session_state:
     st.session_state.ingest_notice = ""
+if "generating" not in st.session_state:
+    st.session_state.generating = False
+if "agent_started" not in st.session_state:
+    st.session_state.agent_started = False
 
 
 @st.cache_data(ttl=15, show_spinner=False)
@@ -531,11 +671,68 @@ def _ingest_files(uploaded_files, progress_bar, status) -> list[dict]:
     return results
 
 
-def _submit(text: str) -> None:
+def _submit(text: str, attachments: list[dict] | None = None) -> None:
     text = text.strip()
-    if text:
-        st.session_state.messages.append({"role": "user", "content": text})
+    att = attachments or []
+    if text or att:
+        st.session_state.messages.append({
+            "role": "user",
+            "content": text or "（请根据附件回答）",
+            "attachments": att,
+        })
         st.session_state.generating = True
+
+
+def _render_user_attachments(attachments: list[dict] | None) -> None:
+    if not attachments:
+        return
+    cols = st.columns(min(len(attachments), 4))
+    for i, att in enumerate(attachments):
+        with cols[i % len(cols)]:
+            if att.get("kind") == "image":
+                import base64
+                st.image(base64.b64decode(att["b64"]), caption=att.get("name", "图片"), use_container_width=True)
+            elif att.get("kind") == "document":
+                st.caption(f"文档 {att.get('name')}（{att.get('chars', 0)} 字）")
+
+
+def _render_metrics(metrics: dict | None) -> None:
+    if not metrics:
+        return
+    name = metrics.get("primary_name", "指标")
+    display = metrics.get("primary_display", "—")
+    hint = metrics.get("primary_hint", "")
+    passed = metrics.get("primary_pass", True)
+    status_cls = "pass" if passed else "warn"
+
+    chips = []
+    if metrics.get("tool_calls"):
+        chips.append(f"工具 {metrics['tool_calls']} 次")
+    if metrics.get("react_iterations"):
+        chips.append(f"ReAct {metrics['react_iterations']} 轮")
+    rag = metrics.get("rag_eval") or {}
+    if rag.get("mode") == "dual":
+        l1, l2 = rag.get("layer1", {}), rag.get("layer2", {})
+        chips.append(
+            f"检索层 {'✓' if l1.get('pass') else '✗'} {l1.get('avg_score', 0):.2f}"
+            if l1.get("avg_score") is not None else "检索层 —"
+        )
+        chips.append(
+            f"生成层 {'✓' if l2.get('pass') else '✗'} {l2.get('support_rate', 0):.0%}"
+            if l2.get("support_rate") is not None else "生成层 —"
+        )
+    elif metrics.get("retrieval_hits"):
+        chips.append(f"检索 {metrics['retrieval_hits']} 条")
+
+    chip_html = "".join(f'<span class="dr-metric-chip">{c}</span>' for c in chips)
+    st.markdown(
+        f'<div class="dr-metrics">'
+        f'<span class="dr-metric-primary {status_cls}">{name} {display}</span>'
+        f'{chip_html}'
+        f'<span class="dr-metric-chip">{hint}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_trace(trace: list[dict]) -> None:
@@ -604,7 +801,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.ingest_notice = ""
         st.session_state.generating = False
-        st.session_state.thread_id = None
+        st.session_state.agent_started = False
         st.rerun()
 
 # ---- 主区域 ----
@@ -612,32 +809,70 @@ st.markdown(HEADER_HTML, unsafe_allow_html=True)
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
+        if msg["role"] == "user" and msg.get("attachments"):
+            _render_user_attachments(msg["attachments"])
         st.markdown(msg["content"])
-        if msg["role"] == "assistant" and msg.get("trace"):
-            _render_trace(msg["trace"])
+        if msg["role"] == "assistant":
+            if msg.get("metrics"):
+                _render_metrics(msg["metrics"])
+            if msg.get("trace"):
+                _render_trace(msg["trace"])
 
 if not st.session_state.messages:
     st.markdown(EMPTY_STATE_HTML, unsafe_allow_html=True)
 
-if prompt := st.chat_input("输入研究问题或日常对话…"):
-    _submit(prompt)
+CHAT_FILE_TYPES = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "pdf", "docx", "txt", "md", "csv"]
+prompt = st.chat_input(
+    "输入研究问题或日常对话…",
+    accept_file="multiple",
+    file_type=CHAT_FILE_TYPES,
+)
+if prompt:
+    text = (prompt.text or "").strip()
+    attachments: list[dict] = []
+    if prompt.files:
+        from config.settings import settings
+        from src.multimodal.attachments import parse_upload
+
+        for f in prompt.files:
+            try:
+                attachments.append(
+                    parse_upload(f.name, f.getvalue(), max_doc_chars=settings.CHAT_ATTACHMENT_MAX_DOC_CHARS)
+                )
+            except ValueError as e:
+                st.warning(str(e))
+    if text or attachments:
+        _submit(text, attachments)
+        st.rerun()
+
+# 先快速刷新一帧，让用户消息立刻显示（避免与 Agent 阻塞同跑导致界面空白）
+if st.session_state.get("generating") and not st.session_state.get("agent_started"):
+    st.session_state.agent_started = True
+    with st.chat_message("assistant"):
+        st.markdown("_正在分析…_")
     st.rerun()
 
-if st.session_state.get("generating") and st.session_state.messages:
-    if st.session_state.messages[-1]["role"] == "user":
+if st.session_state.get("generating") and st.session_state.get("agent_started"):
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
         question = st.session_state.messages[-1]["content"]
+        attachments = st.session_state.messages[-1].get("attachments") or []
         with st.chat_message("assistant"):
             with st.spinner("正在分析…"):
                 try:
-                    result = _load()(question, thread_id=st.session_state.thread_id)
-                    st.session_state.thread_id = result.get("thread_id")
+                    result = _load()(question, attachments=attachments)
                     answer = result["answer"]
                     trace = result.get("trace", [])
+                    metrics = result.get("metrics")
                 except Exception as e:
                     answer = f"处理失败：{e}"
                     trace = [{"step": "error", "detail": str(e)}]
-            st.markdown(answer)
-            if trace:
-                _render_trace(trace)
-        st.session_state.messages.append({"role": "assistant", "content": answer, "trace": trace})
+                    metrics = None
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "trace": trace,
+            "metrics": metrics,
+        })
         st.session_state.generating = False
+        st.session_state.agent_started = False
+        st.rerun()

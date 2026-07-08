@@ -3,17 +3,18 @@ src/tools/builtin_tools.py — 内置工具集合
 演示三类典型工具：
   1. KnowledgeSearchTool  — 检索型（接 RAG 知识库），Agent 获取事实的主力
   2. CalculatorTool       — 计算型（安全表达式求值），演示确定性工具
-  3. WebSearchTool        — 外部型（此处为可控 mock，演示“外部依赖 + 偶发失败”）
+  3. WebSearchTool        — 外部型（Tavily / DuckDuckGo 联网搜索）
 最后统一注册到 registry。
 """
 from __future__ import annotations
 
 import ast
 import operator as op
-import random
 
+from config.settings import settings
 from src.rag.retriever import retriever
 from src.tools.base import BaseTool, registry
+from src.tools.web_search import search_web
 
 # ---------------------------------------------------------------- #
 # 1) 知识库检索工具
@@ -81,18 +82,26 @@ class CalculatorTool(BaseTool):
 
 
 # ---------------------------------------------------------------- #
-# 3) 网络搜索工具（mock：演示外部依赖会偶发失败，用于测试重试/降级）
+# 3) 联网搜索工具（Tavily / DuckDuckGo）
 # ---------------------------------------------------------------- #
 class WebSearchTool(BaseTool):
     name = "web_search"
-    description = "联网搜索最新信息（演示版为受控模拟，会以一定概率失败以触发容错逻辑）。"
-    schema = {"query": {"type": "str", "desc": "搜索词", "required": True}}
-    fail_rate = 0.35  # 故意让它偶发失败，展示中间件的重试价值
+    description = (
+        "联网搜索互联网上的最新公开信息，返回标题、链接与摘要。"
+        "当用户明确要求「上网搜索/联网查询/最新资讯」，或问题超出本地知识库范围时使用。"
+        "本地文献问题应优先用 knowledge_search，不要滥用本工具。"
+    )
+    schema = {
+        "query": {"type": "str", "desc": "搜索关键词或问题", "required": True},
+        "max_results": {"type": "int", "desc": "返回条数，默认5", "required": False},
+    }
 
-    def _run(self, query: str):
-        if random.random() < self.fail_rate:
-            raise TimeoutError("上游搜索服务超时（模拟）")
-        return [f"[模拟结果] 关于「{query}」的最新公开资料摘要 #{i}" for i in range(1, 3)]
+    def _run(self, query: str, max_results: int | None = None):
+        k = max_results or settings.WEB_SEARCH_MAX_RESULTS
+        results = search_web(query, max_results=k)
+        if not results:
+            return {"query": query, "results": [], "note": "未检索到相关网页"}
+        return {"query": query, "count": len(results), "results": results}
 
 
 # ---- 注册 ----

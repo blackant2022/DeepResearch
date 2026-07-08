@@ -3,6 +3,8 @@ src/orchestrator/graph.py — LangGraph 超级智能体编排
 
 主流程：
   recall_memory（长期记忆召回）
+    → query_rewrite（Query 改进）
+    → multimodal（图片理解）
     → router（意图路由）
         ├─ chat           日常对话（快速路径）
         ├─ super_think    超级智能体 ReAct 环
@@ -15,6 +17,7 @@ import uuid
 from functools import lru_cache
 
 from langgraph.graph import END, StateGraph
+from langgraph.types import Overwrite
 
 import src.tools  # noqa: F401
 
@@ -30,10 +33,37 @@ from src.memory.long_term_memory import ltm
 from src.memory.working_memory import WorkingMemory
 from src.orchestrator.nodes.tool_node import execute_tool_calls
 from src.orchestrator.state import AgentState
+from src.evaluation.run_metrics import build_run_metrics
+from src.multimodal.attachments import has_images
+from src.llm.provider import llm
 from src.utils.logger import get_logger
 
 log = get_logger("orchestrator")
 MAX_REVISE = 1
+
+
+def _build_turn_input(question: str, attachments: list[dict]) -> AgentState:
+    """每轮用户提问的初始状态：覆盖检查点中的旧消息/轨迹，避免答非所问。"""
+    return {
+        "question": question,
+        "original_question": question,
+        "query_rewrite_note": "",
+        "attachments": attachments,
+        "trace": Overwrite([]),
+        "messages": Overwrite([]),
+        "wm_items": Overwrite([]),
+        "react_iteration": 0,
+        "wm_items": [],
+        "revise_count": 0,
+        "revise_note": "",
+        "final_answer": "",
+        "draft": "",
+        "route": "",
+        "route_reason": "",
+        "plan": [],
+        "findings": [],
+        "grounding": {},
+    }
 
 
 def _hydrate_wm(state: AgentState) -> WorkingMemory:
@@ -52,12 +82,57 @@ _AGENT_LABEL = {
 
 
 # ===================== 公共节点 ===================== #
+def node_query_rewrite(state: AgentState) -> dict:
+    """检索前 Query 改进：口语化问题 → 检索友好表述。"""
+    from src.rag.query_rewrite import apply_query_rewrite, _core_question
+
+    full_q = state.get("question") or ""
+    new_q, meta = apply_query_rewrite(full_q, memory_hint=state.get("memory_hint", ""))
+    core = _core_question(full_q)
+    rewritten_core = _core_question(new_q)
+
+    if meta.get("skipped") or rewritten_core == core:
+        return {
+            "trace": [{
+                "step": "query_rewrite",
+                "detail": meta.get("changes", "保持原问"),
+            }],
+        }
+
+    return {
+        "question": new_q,
+        "query_rewrite_note": meta.get("changes", ""),
+        "trace": [{
+            "step": "query_rewrite",
+            "detail": f"「{core[:36]}」→「{rewritten_core[:36]}」",
+            "meta": {"original": core, "rewritten": rewritten_core},
+        }],
+    }
+
+
 def node_recall(state: AgentState) -> dict:
     hits = ltm.recall(state["question"], k=2)
     hint = "\n".join(f"- {h['text']}" for h in hits) if hits else ""
     return {
         "memory_hint": hint,
         "trace": [{"step": "recall_memory", "detail": f"召回 {len(hits)} 条长期记忆"}],
+    }
+
+
+def node_multimodal(state: AgentState) -> dict:
+    """图片 → 视觉模型转文字，注入 question；文档已在 run_agent 阶段拼入。"""
+    attachments = state.get("attachments") or []
+    images = [a for a in attachments if a.get("kind") == "image"]
+    if not images:
+        return {}
+
+    vision_text = llm.describe_images(state.get("question", ""), images)
+    q = (state.get("question") or "").strip()
+    enhanced = f"{q}\n\n【图片视觉分析】\n{vision_text}" if q else vision_text
+    names = "、".join(a.get("name", "图片") for a in images)
+    return {
+        "question": enhanced,
+        "trace": [{"step": "multimodal", "detail": f"已理解 {len(images)} 张图片（{names}）"}],
     }
 
 
@@ -105,8 +180,14 @@ def node_super_think(state: AgentState) -> dict:
     assistant_msg = result["assistant_message"]
     tool_calls = result.get("tool_calls") or []
 
+    new_msgs: list[dict]
+    if iteration == 1 and not (state.get("messages") or []):
+        new_msgs = list(history) + [assistant_msg]
+    else:
+        new_msgs = [assistant_msg]
+
     updates: dict = {
-        "messages": [assistant_msg],
+        "messages": new_msgs,
         "react_iteration": iteration,
         "trace": [{
             "step": "super_think",
@@ -151,9 +232,9 @@ def node_super_finalize(state: AgentState) -> dict:
     """达到最大轮次仍有 tool_calls 时，用已有上下文兜底生成答案。"""
     if state.get("final_answer"):
         return {}
-    from src.llm.provider import llm
+    from src.llm.messages import repair_tool_message_chain
 
-    messages = list(state.get("messages") or [])
+    messages = repair_tool_message_chain(list(state.get("messages") or []))
     messages.append({
         "role": "user",
         "content": "请根据以上工具结果直接给出最终回答，不要再调用工具。",
@@ -255,17 +336,22 @@ def node_deep_research(state: AgentState) -> dict:
     sub = _DEEP_APP.invoke(state)
     out: dict = {"trace": sub.get("trace", [])}
     for key in (
-        "final_answer", "draft", "grounding", "plan", "replans", "findings", "wm_items",
+        "final_answer", "draft", "grounding", "plan", "replans", "findings",
     ):
         if key in sub:
             out[key] = sub[key]
+    # wm_items 由子图内部 reducer 合并，不重复写回主图
+    if "wm_items" in sub:
+        out["wm_items"] = sub["wm_items"]
     return out
 
 
 # ===================== 主图 ===================== #
 def build_dispatch_graph(*, checkpointer=None):
     g = StateGraph(AgentState)
+    g.add_node("query_rewrite", node_query_rewrite)
     g.add_node("recall_memory", node_recall)
+    g.add_node("multimodal", node_multimodal)
     g.add_node("router", node_router)
     g.add_node("chat", node_chat)
     g.add_node("super_think", node_super_think)
@@ -274,7 +360,10 @@ def build_dispatch_graph(*, checkpointer=None):
     g.add_node("deep_research", node_deep_research)
 
     g.set_entry_point("recall_memory")
-    g.add_edge("recall_memory", "router")
+    g.add_edge("recall_memory", "query_rewrite")
+    g.add_edge("query_rewrite", "multimodal")
+    g.add_edge("recall_memory", "multimodal")
+    g.add_edge("multimodal", "router")
     g.add_conditional_edges(
         "router",
         route_by_agent,
@@ -300,27 +389,36 @@ def _get_checkpointer():
 
 @lru_cache(maxsize=1)
 def _get_app():
+    try:
+        from src.mcp.client import register_mcp_tools
+        register_mcp_tools()
+    except Exception as e:
+        log.warning(f"MCP 工具注册跳过: {e}")
     return build_dispatch_graph(checkpointer=_get_checkpointer())
 
 
-def run_agent(question: str, thread_id: str | None = None) -> dict:
-    """运行超级智能体；thread_id 相同可借助 checkpointer 延续上下文。"""
+def run_agent(
+    question: str,
+    thread_id: str | None = None,
+    attachments: list[dict] | None = None,
+) -> dict:
+    """运行超级智能体；attachments 为 parse_uploads 产出的可序列化附件列表。"""
+    from src.multimodal.attachments import build_enhanced_question
+
     log.info(f"===== 开始：{question[:60]} =====")
     tid = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": tid}}
 
-    init: AgentState = {
-        "question": question,
-        "trace": [],
-        "messages": [],
-        "react_iteration": 0,
-        "wm_items": [],
-        "revise_count": 0,
-        "revise_note": "",
-    }
+    att = attachments or []
+    enhanced_q = build_enhanced_question(question, att)
+    if has_images(att):
+        log.info(f"多模态输入：{sum(1 for a in att if a.get('kind')=='image')} 图，"
+                 f"{sum(1 for a in att if a.get('kind')=='document')} 文档")
+
+    init = _build_turn_input(enhanced_q, att)
     final = _get_app().invoke(init, config=config)
     log.info("===== 完成 =====")
-    return {
+    payload = {
         "answer": final.get("final_answer", final.get("draft", "")),
         "trace": final.get("trace", []),
         "plan": final.get("plan", []),
@@ -331,3 +429,5 @@ def run_agent(question: str, thread_id: str | None = None) -> dict:
         "thread_id": tid,
         "react_iterations": final.get("react_iteration", 0),
     }
+    payload["metrics"] = build_run_metrics(payload)
+    return payload

@@ -47,9 +47,17 @@ def execute_tool_calls(
 
         tool_messages.append({
             "role": "tool",
-            "tool_call_id": tc["id"],
+            "tool_call_id": tc.get("id") or f"call_{len(tool_messages)}",
             "content": json.dumps(payload, ensure_ascii=False),
         })
-        trace.append({"step": "tool", "detail": detail})
+        trace_item: dict = {"step": "tool", "detail": detail}
+        if name == "knowledge_search" and tool is not None and result.ok:
+            hits = result.output if isinstance(result.output, list) else []
+            scores = [h.get("score", 0) for h in hits if isinstance(h, dict)]
+            if scores:
+                avg = sum(scores) / len(scores)
+                trace_item["detail"] = f"{detail}，相关度均值 {avg:.2f}"
+                trace_item["meta"] = {"retrieval_scores": scores}
+        trace.append(trace_item)
 
     return tool_messages, trace

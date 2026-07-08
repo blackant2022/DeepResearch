@@ -140,6 +140,8 @@ deepresearch-agent/
 | `MAX_REACT_ITERATIONS` | `8` | 超级智能体最大 ReAct 轮次 |
 | `FAST_MODE` | `true` | 关闭后复杂问题走深度研究链 |
 | `TOP_K` | `3` | RAG 检索条数 |
+| `WEB_SEARCH_PROVIDER` | `auto` | 联网搜索：`auto` / `tavily` / `duckduckgo` / `mock` |
+| `TAVILY_API_KEY` | — | Tavily API Key（可选，[tavily.com](https://tavily.com)） |
 
 完整列表见 `.env.example`。
 
@@ -152,7 +154,7 @@ deepresearch-agent/
 | `knowledge_search` | 本地知识库语义检索 |
 | `kb_overview` | 列出知识库全部文档 |
 | `calculator` | 安全数学表达式计算 |
-| `web_search` | 联网搜索（演示 mock） |
+| `web_search` | 联网搜索（Tavily / DuckDuckGo） |
 
 扩展方式：在 `src/tools/builtin_tools.py` 注册新工具，超级智能体自动获得调用能力。
 

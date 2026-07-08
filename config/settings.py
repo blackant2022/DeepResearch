@@ -24,11 +24,19 @@ def _abs_path(value: str) -> str:
 
 class Settings(BaseSettings):
     # ---- LLM (DeepSeek, OpenAI 兼容协议) ----
-    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = "sk-836333d5110a4703b8c19d3f3b634d37"
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_MODEL: str = "deepseek-chat"
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2048
+
+    # ---- 多模态（OpenAI 兼容视觉 API，可自行配置 Qwen-VL / GPT-4o 等）----
+    MULTIMODAL_API_KEY: str = "sk-kamngwJhxRp8bBdGXooK2ImRAgvIJXWF39Hf78WCJBl7mFdE"          # 空则复用 DEEPSEEK_API_KEY
+    MULTIMODAL_BASE_URL: str = "https://api.qingyuntop.top/v1"         # 空则复用 DEEPSEEK_BASE_URL
+    MULTIMODAL_MODEL: str = "gpt-5-mini-2025-08-07"            # 如 qwen-vl-max / gpt-4o / deepseek 视觉模型
+    MULTIMODAL_MAX_TOKENS: int = 2048
+    MULTIMODAL_ENABLED: bool = True
+    CHAT_ATTACHMENT_MAX_DOC_CHARS: int = 12000
 
     # ---- 嵌入模型（FastEmbed / ONNX，比 sentence-transformers 轻，首次检索时自动下载）----
     EMBEDDING_MODEL: str = "BAAI/bge-small-zh-v1.5"
@@ -51,8 +59,24 @@ class Settings(BaseSettings):
     MAX_TOOL_RETRY: int = 3
     MAX_REACT_ITERATIONS: int = 8    # 超级智能体 ReAct 最大轮次
     GROUNDING_THRESHOLD: float = 0.6
+    RETRIEVAL_THRESHOLD: float = 0.55   # 双层 RAG 评估：检索层门禁
+
+    # ---- MCP（Model Context Protocol）----
+    MCP_CLIENT_ENABLED: bool = False      # 是否接入外部 MCP Server 工具
+    # JSON 数组，示例：[{"command":"python","args":["run_mcp_server.py"],"prefix":"dr"}]
+    MCP_SERVERS: str = ""
     MAX_SUBTASKS: int = 6
     CHECKPOINT_DIR: str = "data/checkpoints"
+
+    QUERY_REWRITE_ENABLED: bool = True
+
+    # ---- 联网搜索 ----
+    # auto：有 TAVILY_API_KEY 用 Tavily，否则 DuckDuckGo
+    WEB_SEARCH_PROVIDER: str = "auto"       # auto | tavily | duckduckgo | mock
+    TAVILY_API_KEY: str = "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"
+    TAVILY_SEARCH_DEPTH: str = "basic"      # basic | advanced
+    WEB_SEARCH_MAX_RESULTS: int = 5
+    WEB_SEARCH_REGION: str = "cn-zh"        # DuckDuckGo 区域
 
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / ".env"),

@@ -12,15 +12,17 @@ from src.tools.base import registry
 _SUPER_SYSTEM = """你是 DeepResearch 超级智能体，面向学术文献与科研知识库。
 
 【能力】
-- 可调用工具检索本地文献、查看知识库目录、精确计算、联网搜索（模拟）
+- 可调用工具检索本地文献、查看知识库目录、精确计算、联网搜索互联网
 - 可综合多轮工具结果给出有据回答
 
 【规则】
 1. 涉及文献内容、研究方法、实验结论、知识库有什么 → 必须先调用 knowledge_search 或 kb_overview
-2. 只依据工具返回的证据作答；证据不足必须明确说「根据现有资料无法确定」
-3. 数值问题用 calculator；需要外部最新信息可用 web_search
-4. 信息已足够时直接给出完整回答，避免无意义重复检索
-5. 用中文回答，结构清晰，必要时分点列举"""
+2. 用户明确要求上网搜索、或需要本地库以外的最新公开信息 → 使用 web_search
+3. 只依据工具返回的证据作答；证据不足必须明确说「根据现有资料无法确定」
+4. 数值问题用 calculator
+5. 信息已足够时直接给出完整回答，避免无意义重复检索
+6. 用户可能附带图片或文档，图片分析结果在【图片视觉分析】中，文档在【用户本次上传的文档内容】中，请一并参考
+7. 用中文回答，结构清晰，必要时分点列举；引用网页时注明标题或链接"""
 
 
 class SuperAgent(BaseAgent):
@@ -38,8 +40,11 @@ class SuperAgent(BaseAgent):
 
     def think_with_tools(self, messages: list[dict]) -> dict:
         """单轮推理：可能返回 tool_calls 或最终文本。"""
+        from src.llm.messages import repair_tool_message_chain
+
         tools = registry.openai_schemas()
-        result = llm.chat_with_tools(messages, tools)
+        safe_messages = repair_tool_message_chain(messages)
+        result = llm.chat_with_tools(safe_messages, tools)
         assistant: dict = {"role": "assistant", "content": result.get("content")}
         if result.get("tool_calls"):
             assistant["tool_calls"] = result["tool_calls"]

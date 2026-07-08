@@ -56,6 +56,60 @@ class LLMProvider:
         self.model = settings.LLM_MODEL
         log.info(f"LLMProvider 就绪 → model={self.model} base={settings.DEEPSEEK_BASE_URL}")
 
+    def _multimodal_config(self) -> tuple[str, str, str]:
+        key = (settings.MULTIMODAL_API_KEY or settings.DEEPSEEK_API_KEY or "").strip()
+        base = (settings.MULTIMODAL_BASE_URL or settings.DEEPSEEK_BASE_URL or "").strip()
+        model = (settings.MULTIMODAL_MODEL or "").strip()
+        if not key:
+            raise RuntimeError("未配置 MULTIMODAL_API_KEY 或 DEEPSEEK_API_KEY")
+        if not model:
+            raise RuntimeError("未配置 MULTIMODAL_MODEL（视觉模型名称，如 qwen-vl-max）")
+        return key, base, model
+
+    def chat_multimodal(
+        self,
+        messages: list[dict[str, Any]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """多模态对话（图片 + 文本），messages 中 user content 可为 content parts 数组。"""
+        if not settings.MULTIMODAL_ENABLED:
+            raise RuntimeError("多模态功能已在配置中关闭（MULTIMODAL_ENABLED=false）")
+        key, base, model = self._multimodal_config()
+        client = OpenAI(api_key=key, base_url=base)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=settings.LLM_TEMPERATURE if temperature is None else temperature,
+            max_tokens=max_tokens or settings.MULTIMODAL_MAX_TOKENS,
+            stream=False,
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+    def describe_images(
+        self,
+        question: str,
+        images: list[dict[str, Any]],
+        *,
+        system: str = "你是科研文献分析助手。请用中文客观描述用户上传的图片内容，"
+        "包括图表、文字、实验结果、光谱曲线等可见信息。不要编造看不见的内容。",
+    ) -> str:
+        """对一批图片做视觉理解，返回文字描述。"""
+        from src.multimodal.attachments import image_data_url
+
+        parts: list[dict[str, Any]] = []
+        text = question.strip() or "请描述这些图片中的关键信息。"
+        parts.append({"type": "text", "text": text})
+        for img in images:
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": image_data_url(img)},
+            })
+        return self.chat_multimodal([
+            {"role": "system", "content": system},
+            {"role": "user", "content": parts},
+        ])
+
     # ------------------------------------------------------------------ #
     def chat(
         self,
