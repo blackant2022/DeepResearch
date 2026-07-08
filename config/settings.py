@@ -24,15 +24,15 @@ def _abs_path(value: str) -> str:
 
 class Settings(BaseSettings):
     # ---- LLM (DeepSeek, OpenAI 兼容协议) ----
-    DEEPSEEK_API_KEY: str = "sk-836333d5110a4703b8c19d3f3b634d37"
+    DEEPSEEK_API_KEY: str = "xxx"
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_MODEL: str = "deepseek-chat"
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_TOKENS: int = 2048
 
     # ---- 多模态（OpenAI 兼容视觉 API，可自行配置 Qwen-VL / GPT-4o 等）----
-    MULTIMODAL_API_KEY: str = "sk-kamngwJhxRp8bBdGXooK2ImRAgvIJXWF39Hf78WCJBl7mFdE"          # 空则复用 DEEPSEEK_API_KEY
-    MULTIMODAL_BASE_URL: str = "https://api.qingyuntop.top/v1"         # 空则复用 DEEPSEEK_BASE_URL
+    MULTIMODAL_API_KEY: str = "xxx"          # 空则复用 DEEPSEEK_API_KEY
+    MULTIMODAL_BASE_URL: str = "xxx"         # 空则复用 DEEPSEEK_BASE_URL
     MULTIMODAL_MODEL: str = "gpt-5-mini-2025-08-07"            # 如 qwen-vl-max / gpt-4o / deepseek 视觉模型
     MULTIMODAL_MAX_TOKENS: int = 2048
     MULTIMODAL_ENABLED: bool = True
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # ---- 联网搜索 ----
     # auto：有 TAVILY_API_KEY 用 Tavily，否则 DuckDuckGo
     WEB_SEARCH_PROVIDER: str = "auto"       # auto | tavily | duckduckgo | mock
-    TAVILY_API_KEY: str = "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"
+    TAVILY_API_KEY: str = "xxx"
     TAVILY_SEARCH_DEPTH: str = "basic"      # basic | advanced
     WEB_SEARCH_MAX_RESULTS: int = 5
     WEB_SEARCH_REGION: str = "cn-zh"        # DuckDuckGo 区域
