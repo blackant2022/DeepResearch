@@ -107,16 +107,27 @@ class ResearcherAgent(BaseAgent):
             note = self._format_overview(result.output)
             return evidence, note
 
-        if tool_name == "knowledge_search" and isinstance(result.output, list):
-            evidence = self._collect_evidence(result.output)
+        if tool_name == "knowledge_search":
+            hits_list = self._normalize_search_hits(result.output)
+            evidence = self._collect_evidence(hits_list)
             if not evidence and goal != question:
                 retry = pipeline.invoke(registry.get("knowledge_search"), query=question)
-                if retry.ok and isinstance(retry.output, list):
-                    evidence = self._collect_evidence(retry.output)
-                    return evidence, self._format_hits(retry.output)
-            return evidence, self._format_hits(result.output)
+                if retry.ok:
+                    retry_hits = self._normalize_search_hits(retry.output)
+                    evidence = self._collect_evidence(retry_hits)
+                    return evidence, self._format_hits(retry_hits)
+            return evidence, self._format_hits(hits_list)
 
         return [], f"[{tool_name} 成功] {result.output}"
+
+    @staticmethod
+    def _normalize_search_hits(output) -> list:
+        if isinstance(output, dict):
+            hits = output.get("hits") or []
+            return [h for h in hits if isinstance(h, dict)]
+        if isinstance(output, list):
+            return [h for h in output if isinstance(h, dict)]
+        return []
 
     @staticmethod
     def _evidence_from_overview(data: dict) -> list[dict]:

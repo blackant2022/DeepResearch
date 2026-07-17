@@ -19,7 +19,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from config.settings import settings
+from config.settings import secret_value, settings
 from src.utils.logger import get_logger
 
 log = get_logger("llm")
@@ -35,33 +35,31 @@ class LLMProvider:
         return cls._instance
 
     def _init(self) -> None:
-        key = (settings.DEEPSEEK_API_KEY or "").strip()
+        key = secret_value(settings.DEEPSEEK_API_KEY)
 
         # 校验：key 不能为空，且必须是纯 ASCII
         if not key:
             raise RuntimeError(
-                "❌ 未配置 DEEPSEEK_API_KEY。请在 .env 填入真实的 DeepSeek key"
-                "（platform.deepseek.com 申请，形如 sk-xxxx，纯英文数字）。"
+                "未配置 DEEPSEEK_API_KEY。请在项目根目录 .env 中填入 Key"
+                "（platform.deepseek.com 申请），切勿把真实 Key 写进代码或提交 Git。"
             )
         try:
             key.encode("ascii")
         except UnicodeEncodeError:
             raise RuntimeError(
-                "❌ DEEPSEEK_API_KEY 含非 ASCII 字符（可能混进了中文/全角符号/占位符）。"
-                "请重新从 DeepSeek 官网复制纯英文数字的 key 到 .env。"
+                "DEEPSEEK_API_KEY 含非 ASCII 字符。请重新从官网复制到 .env。"
             )
 
-        # 关键：只传 api_key / base_url，绝不传 proxies
         self.client = OpenAI(api_key=key, base_url=settings.DEEPSEEK_BASE_URL)
         self.model = settings.LLM_MODEL
         log.info(f"LLMProvider 就绪 → model={self.model} base={settings.DEEPSEEK_BASE_URL}")
 
     def _multimodal_config(self) -> tuple[str, str, str]:
-        key = (settings.MULTIMODAL_API_KEY or settings.DEEPSEEK_API_KEY or "").strip()
+        key = secret_value(settings.MULTIMODAL_API_KEY) or secret_value(settings.DEEPSEEK_API_KEY)
         base = (settings.MULTIMODAL_BASE_URL or settings.DEEPSEEK_BASE_URL or "").strip()
         model = (settings.MULTIMODAL_MODEL or "").strip()
         if not key:
-            raise RuntimeError("未配置 MULTIMODAL_API_KEY 或 DEEPSEEK_API_KEY")
+            raise RuntimeError("未配置 MULTIMODAL_API_KEY 或 DEEPSEEK_API_KEY（请写在 .env）")
         if not model:
             raise RuntimeError("未配置 MULTIMODAL_MODEL（视觉模型名称，如 qwen-vl-max）")
         return key, base, model

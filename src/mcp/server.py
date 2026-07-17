@@ -24,7 +24,10 @@ def knowledge_search(query: str, k: int = 5) -> list[dict]:
     tool = registry.get("knowledge_search")
     if tool is None:
         return []
-    return tool(query=query, k=k).output or []
+    out = tool(query=query, k=k).output
+    if isinstance(out, dict):
+        return out.get("hits") or []
+    return out or []
 
 
 @mcp.tool()

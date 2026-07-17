@@ -61,17 +61,25 @@ cd DeepResearch
 pip install -r requirements.txt
 ```
 
-### 2. 配置 API Key
+### 2. 配置 API Key（仅本地 `.env`，不要提交）
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`，填入 DeepSeek API Key（[免费注册](https://platform.deepseek.com)）：
+编辑 **`.env`**（已被 `.gitignore` 忽略），填入 Key：
 
 ```env
-DEEPSEEK_API_KEY=sk-your-key-here
+DEEPSEEK_API_KEY=你的真实Key
 ```
+
+推送前建议扫描一次：
+
+```bash
+python scripts/check_secrets.py
+```
+
+> 切勿把真实 Key 写进 `settings.py`、`.env.example`、README 或截图。若 Key 曾进过 Git 历史，请在平台**立即轮换**。
 
 ### 3. 准备文献 & 构建知识库
 

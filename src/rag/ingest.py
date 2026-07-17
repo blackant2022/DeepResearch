@@ -1,6 +1,7 @@
 """
 src/rag/ingest.py — 文档入库（RAG 知识库构建）
 支持 PDF / DOCX / TXT / MD，切分后向量化写入 ChromaDB。
+分块策略：语义相似度划分完整段落 + 长段落动态滑动窗口（见 src.rag.chunking）。
 运行：python -m src.rag.ingest ./data/docs
 """
 from __future__ import annotations
@@ -11,19 +12,13 @@ from pathlib import Path
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config.settings import settings
 from src.memory.embedding import encode_docs
+from src.rag.chunking import hybrid_chunk_text
 from src.utils.logger import get_logger
 
 log = get_logger("rag.ingest")
-
-_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=settings.CHUNK_SIZE,
-    chunk_overlap=settings.CHUNK_OVERLAP,
-    separators=["\n\n", "\n", "。", "！", "？", "；", " ", ""],
-)
 
 
 def _read(path: Path) -> str:
@@ -78,7 +73,7 @@ def ingest_file(path: str | Path) -> dict:
         text = _read(f)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "filename": f.name, "chunks": 0, "error": str(e)}
-    chunks = [c.strip() for c in _splitter.split_text(text) if len(c.strip()) >= 10]
+    chunks = [c.strip() for c in hybrid_chunk_text(text) if len(c.strip()) >= 10]
     if not chunks:
         return {"ok": False, "filename": f.name, "chunks": 0, "error": "未能提取有效文本"}
     _delete_file_chunks(col, f.name)

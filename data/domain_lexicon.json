@@ -1,0 +1,15 @@
+{
+  "高光谱": ["Hyperspectral", "hyperspectral imaging", "HSI", "光谱成像"],
+  "氮含量": ["叶氮含量", "LNC", "leaf nitrogen content", "氮素", "氮浓度"],
+  "反演": ["估测", "估算", "retrieval", "estimation", "定量反演"],
+  "深度学习": ["Deep Learning", "DL", "神经网络", "CNN", "Transformer"],
+  "支持向量回归": ["SVR", "Support Vector Regression"],
+  "偏最小二乘": ["PLSR", "PLS", "Partial Least Squares"],
+  "随机森林": ["Random Forest", "RF"],
+  "无人机": ["UAV", "植保无人机", "drone"],
+  "遥感": ["remote sensing", "RS"],
+  "玉米": ["corn", "maize", "Zea mays"],
+  "叶片": ["leaf", "foliar"],
+  "RAG": ["检索增强生成", "Retrieval Augmented Generation"],
+  "幻觉": ["hallucination", "事实性错误", "无依据生成"]
+}

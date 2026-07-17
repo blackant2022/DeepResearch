@@ -8,6 +8,34 @@ from src.middleware.pipeline import pipeline
 from src.memory.working_memory import WorkingMemory
 
 
+def test_settings_secrets_are_masked():
+    from config.settings import settings, secret_value
+
+    # SecretStr 打印时不暴露明文
+    assert "sk-" not in repr(settings.DEEPSEEK_API_KEY)
+    summary = settings.masked_summary()
+    assert summary["DEEPSEEK_API_KEY"] in ("set", "missing")
+    # secret_value 可取出字符串（长度可为 0）
+    assert isinstance(secret_value(settings.DEEPSEEK_API_KEY), str)
+
+
+def test_check_secrets_script_clean():
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run(
+        [sys.executable, str(root / "scripts" / "check_secrets.py")],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
 def test_calculator_ok():
     r = CalculatorTool()(expression="(3+5)*2")
     assert r.ok and r.output == 16
@@ -112,10 +140,31 @@ def test_execute_tool_calls():
     assert trace[0]["step"] == "tool"
 
 
-def test_route_maps_search_to_super():
+def test_route_maps_search_to_policy():
     from src.orchestrator.graph import route_by_agent
-    assert route_by_agent({"route": "search"}) == "super"
-    assert route_by_agent({"route": "super"}) == "super"
+    assert route_by_agent({"route": "search"}) == "policy"
+    assert route_by_agent({"route": "super"}) == "policy"
+    assert route_by_agent({"route": "chat"}) == "chat"
+    assert route_by_agent({"route": "deep_research"}) == "deep_research"
+
+
+def test_context_manager_compacts_tool_errors():
+    from src.memory.context_manager import ContextManager
+
+    cm = ContextManager()
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "q"},
+        {
+            "role": "tool",
+            "tool_call_id": "1",
+            "content": '{"ok": false, "error": "' + ("x" * 500) + '", "error_type": "timeout"}',
+        },
+    ]
+    out = cm.prepare_for_policy(msgs)
+    tool = out[-1]["content"]
+    assert "timeout" in tool
+    assert len(tool) < 400
 
 
 def test_super_agent_initial_messages():
@@ -149,6 +198,9 @@ def test_build_turn_input_resets_checkpoint_channels():
 
 def test_query_rewrite_skips_chitchat(monkeypatch):
     from src.rag.query_rewrite import improve_query
+    from config.settings import settings
+
+    monkeypatch.setattr(settings, "QUERY_REWRITE_ENABLED", True)
 
     def _fail(*_a, **_k):
         raise AssertionError("chitchat should not call LLM")
@@ -157,6 +209,86 @@ def test_query_rewrite_skips_chitchat(monkeypatch):
     r = improve_query("你好")
     assert r["skipped"] is True
     assert r["rewritten"] == "你好"
+
+
+def test_query_rewrite_skips_when_disabled(monkeypatch):
+    from config.settings import settings
+    from src.rag.query_rewrite import improve_query
+
+    monkeypatch.setattr(settings, "QUERY_REWRITE_ENABLED", False)
+
+    def _fail(*_a, **_k):
+        raise AssertionError("disabled rewrite must not call LLM")
+
+    monkeypatch.setattr("src.rag.query_rewrite.llm.chat_json", _fail)
+    r = improve_query("分析一下这个方法的优缺点")
+    assert r["skipped"] is True
+
+
+def test_query_rewrite_skips_clear_long_question(monkeypatch):
+    from config.settings import settings
+    from src.rag.query_rewrite import improve_query
+
+    monkeypatch.setattr(settings, "QUERY_REWRITE_ENABLED", True)
+
+    def _fail(*_a, **_k):
+        raise AssertionError("clear long query should skip LLM rewrite")
+
+    monkeypatch.setattr("src.rag.query_rewrite.llm.chat_json", _fail)
+    q = "基于高光谱遥感与深度学习的玉米叶片氮含量反演方法有哪些关键精度指标"
+    r = improve_query(q)
+    assert r["skipped"] is True
+
+
+def test_router_fast_mode_skips_llm(monkeypatch):
+    from config.settings import settings
+    from src.agents.router_agent import RouterAgent
+    from src.memory.working_memory import WorkingMemory
+
+    monkeypatch.setattr(settings, "FAST_MODE", True)
+    agent = RouterAgent(WorkingMemory())
+
+    def _fail(*_a, **_k):
+        raise AssertionError("FAST_MODE must not call LLM classify")
+
+    monkeypatch.setattr(agent, "_llm_classify", _fail)
+    d = agent.dispatch("高光谱如何估算玉米氮含量")
+    assert d["agent"] == "super"
+
+    d2 = agent.dispatch("对比一下三种模型的优缺点并做全面综述分析研究")
+    # 需足够长才会 deep_research
+    assert d2["agent"] in ("super", "deep_research")
+
+
+def test_execute_tool_calls_parallel_preserves_order(monkeypatch):
+    from src.orchestrator.nodes.tool_node import execute_tool_calls
+    from src.memory.working_memory import WorkingMemory
+    from config.settings import settings
+
+    monkeypatch.setattr(settings, "PARALLEL_TOOLS", True)
+
+    class FakeTool:
+        name = "calculator"
+        def __call__(self, **kwargs):
+            from src.tools.base import ToolResult
+            expr = kwargs.get("expression", "0")
+            # 模拟耗时无关，直接返回
+            return ToolResult(ok=True, output=eval(expr), tool=self.name, latency_ms=1.0)
+
+    monkeypatch.setattr(
+        "src.orchestrator.nodes.tool_node.registry.get",
+        lambda name: FakeTool() if name == "calculator" else None,
+    )
+    wm = WorkingMemory()
+    tcs = [
+        {"id": "a", "function": {"name": "calculator", "arguments": '{"expression": "1+1"}'}},
+        {"id": "b", "function": {"name": "calculator", "arguments": '{"expression": "2+2"}'}},
+    ]
+    msgs, trace = execute_tool_calls(tcs, wm)
+    assert [m["tool_call_id"] for m in msgs] == ["a", "b"]
+    assert "2" in msgs[0]["content"]
+    assert "4" in msgs[1]["content"]
+    assert any("[并行]" in t["detail"] for t in trace)
 
 
 def test_query_rewrite_preserves_attachments():
@@ -289,6 +421,18 @@ def test_build_run_metrics_retrieval():
     })
     assert m["primary_name"] == "检索相关度"
     assert m["retrieval_avg_score"] == 0.737
+
+
+def test_arch_benchmark_hop_reduction():
+    from src.evaluation.arch_benchmark import run_benchmark
+
+    report = run_benchmark()
+    assert report["summary"]["main_graph_node_reduction_pct"] >= 50
+    qa = next(s for s in report["scenarios"] if s["name"] == "qa_1_tool_round")
+    assert qa["old_hops"] == 8 and qa["new_hops"] == 2
+    assert qa["hop_reduction_pct"] == 75.0
+    assert report["parallel_tools"]["speedup"] >= 1.5
+    assert len(report["resume_bullets"]) >= 3
 
 
 def test_retriever_sees_ingested_kb_from_any_cwd(monkeypatch):

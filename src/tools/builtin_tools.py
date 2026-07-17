@@ -28,8 +28,27 @@ class KnowledgeSearchTool(BaseTool):
     }
 
     def _run(self, query: str, k: int = 5):
-        hits = retriever.search(query, k=k)
-        return [{"content": h["content"], "source": h["filename"], "score": h["score"]} for h in hits]
+        from src.rag.confidence import FALLBACK_MESSAGE
+
+        bundle = retriever.search_with_confidence(query, k=k)
+        hits = [
+            {"content": h["content"], "source": h["filename"], "score": h["score"]}
+            for h in bundle["hits"]
+        ]
+        # 结构化返回：便于置信度门禁与 Context 压缩；兼容旧 list 消费方
+        payload = {
+            "hits": hits,
+            "confidence": bundle["confidence"],
+            "low_confidence": bundle["low_confidence"],
+            "expanded_query": bundle.get("expanded_query") or query,
+        }
+        if bundle["low_confidence"]:
+            payload["instruction"] = (
+                "检索置信度不足，禁止编造文献结论；请明确告知用户证据不足，"
+                "并可建议换表述、补入库或联网搜索。"
+            )
+            payload["fallback_hint"] = FALLBACK_MESSAGE
+        return payload
 
 
 # ---------------------------------------------------------------- #

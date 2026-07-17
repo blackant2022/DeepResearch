@@ -125,9 +125,17 @@ class SearchAgent(BaseAgent):
         tool = registry.get("knowledge_search")
         if tool:
             r = pipeline.invoke(tool, query=question, k=settings.TOP_K)
-            if r.ok and isinstance(r.output, list):
-                return [
-                    {"content": x["content"], "filename": x.get("source", "?"), "score": x.get("score", 0)}
-                    for x in r.output
-                ]
+            if r.ok:
+                raw = r.output
+                hits = raw.get("hits") if isinstance(raw, dict) else raw
+                if isinstance(hits, list):
+                    return [
+                        {
+                            "content": x["content"],
+                            "filename": x.get("source") or x.get("filename", "?"),
+                            "score": x.get("score", 0),
+                        }
+                        for x in hits
+                        if isinstance(x, dict)
+                    ]
         return retriever.search(question, k=settings.TOP_K)

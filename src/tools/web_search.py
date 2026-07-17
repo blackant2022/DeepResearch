@@ -8,7 +8,7 @@ src/tools/web_search.py — 联网搜索后端
 """
 from __future__ import annotations
 
-from config.settings import settings
+from config.settings import secret_value, settings
 from src.utils.logger import get_logger
 
 log = get_logger("web_search")
@@ -35,13 +35,13 @@ def _resolve_provider() -> str:
     if p == "mock":
         return "mock"
     if p == "tavily":
-        if not settings.TAVILY_API_KEY:
-            raise RuntimeError("WEB_SEARCH_PROVIDER=tavily 但未配置 TAVILY_API_KEY")
+        if not secret_value(settings.TAVILY_API_KEY):
+            raise RuntimeError("WEB_SEARCH_PROVIDER=tavily 但未在 .env 配置 TAVILY_API_KEY")
         return "tavily"
     if p == "duckduckgo":
         return "duckduckgo"
     # auto
-    if settings.TAVILY_API_KEY:
+    if secret_value(settings.TAVILY_API_KEY):
         return "tavily"
     return "duckduckgo"
 
@@ -52,7 +52,7 @@ def _search_tavily(query: str, k: int) -> list[dict]:
     except ImportError as e:
         raise RuntimeError("请安装 tavily-python：pip install tavily-python") from e
 
-    client = TavilyClient(api_key=settings.TAVILY_API_KEY)
+    client = TavilyClient(api_key=secret_value(settings.TAVILY_API_KEY))
     resp = client.search(query, max_results=k, search_depth=settings.TAVILY_SEARCH_DEPTH)
     out: list[dict] = []
     for item in resp.get("results", []):
