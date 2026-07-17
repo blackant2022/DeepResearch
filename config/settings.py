@@ -1,7 +1,10 @@
 """
 config/settings.py — 全局配置
-用 pydantic-settings 从 .env 读取，所有参数集中管理，避免硬编码。
-路径一律解析为相对【项目根目录】的绝对路径，避免 Streamlit/IDE 从子目录启动时找不到向量库。
+
+敏感信息（API Key）一律：
+  1. 只从 .env / 环境变量读取
+  2. 使用 pydantic SecretStr，禁止打印/序列化明文
+  3. 代码与 .env.example 中不得出现真实 Key
 """
 from __future__ import annotations
 
@@ -46,17 +49,17 @@ class Settings(BaseSettings):
     MULTIMODAL_ENABLED: bool = True
     CHAT_ATTACHMENT_MAX_DOC_CHARS: int = 12000
 
-    # ---- 嵌入模型（FastEmbed / ONNX，比 sentence-transformers 轻，首次检索时自动下载）----
+    # ---- 嵌入 ----
     EMBEDDING_MODEL: str = "BAAI/bge-small-zh-v1.5"
 
-    # ---- 向量库路径（相对项目根，加载后转为绝对路径）----
+    # ---- 路径 ----
     RAG_CHROMA_DIR: str = "data/chroma"
     LTM_CHROMA_DIR: str = "data/ltm_chroma"
     DOCS_DIR: str = "data/docs"
     RAG_COLLECTION: str = "kb_documents"
     LTM_COLLECTION: str = "long_term_memory"
 
-    # ---- RAG 参数 ----
+    # ---- RAG 分块（语义相似度断点 + 长段动态滑动窗口）----
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 60
     CHUNK_OVERLAP_RATIO: float = 0.12  # 动态重叠下限比例（与 CHUNK_OVERLAP 取较大）
@@ -129,6 +132,5 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# 确保目录存在
 for _p in (settings.RAG_CHROMA_DIR, settings.LTM_CHROMA_DIR, settings.DOCS_DIR, settings.CHECKPOINT_DIR):
     os.makedirs(_p, exist_ok=True)
