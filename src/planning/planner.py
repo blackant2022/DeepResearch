@@ -48,8 +48,9 @@ class Planner:
             hint += "\n【提示】这是知识库目录类问题，子任务使用 kb_overview。"
         elif is_kb_knowledge_summary(question):
             hint += "\n【提示】这是知识综合总结，子任务使用 knowledge_search 检索后归纳，不要用 kb_overview。"
+        max_n = self._max_subtasks()
         prompt = _PLAN_PROMPT.format(
-            max_n=settings.MAX_SUBTASKS,
+            max_n=max_n,
             tools=registry.manifest(),
             memory=hint or "（无）",
             question=question,
@@ -58,15 +59,21 @@ class Planner:
         subtasks = data.get("subtasks", [])
         # 规整：确保字段齐全
         clean = []
-        for i, st in enumerate(subtasks[: settings.MAX_SUBTASKS], 1):
+        for i, st in enumerate(subtasks[:max_n], 1):
             clean.append({
                 "id": st.get("id", i),
                 "goal": st.get("goal", "").strip(),
                 "tool": st.get("tool", "reason"),
                 "depends_on": st.get("depends_on", []),
             })
-        log.info(f"生成规划：{len(clean)} 个子任务")
+        log.info(f"生成规划：{len(clean)} 个子任务（上限 {max_n}）")
         return clean
+
+    @staticmethod
+    def _max_subtasks() -> int:
+        if settings.FAST_MODE:
+            return max(1, int(getattr(settings, "FAST_MAX_SUBTASKS", 3) or 3))
+        return max(1, int(settings.MAX_SUBTASKS or 6))
 
 
 planner = Planner()

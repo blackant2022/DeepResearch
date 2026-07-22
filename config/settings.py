@@ -65,14 +65,25 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_RATIO: float = 0.12  # 动态重叠下限比例（与 CHUNK_OVERLAP 取较大）
     CHUNK_MIN_SIZE: int = 40  # 过短块合并阈值
     SEMANTIC_SPLIT_THRESHOLD: float = 0.55  # 相邻句余弦相似度低于此值则断段
+    # ---- 结构化入库（摘要整块 / 表 Markdown / 参考文献 / 垃圾行）----
+    INGEST_STRUCTURED_CHUNK: bool = True
+    INGEST_FILTER_GARBAGE: bool = True  # 过滤页码、页眉页脚、下载声明等
+    INGEST_DROP_REFERENCES: bool = True  # True=不入库参考文献；False=低权重入库
+    INGEST_REFERENCE_WEIGHT: float = 0.35  # 保留参考文献时的检索权重
+    INGEST_ABSTRACT_MAX_CHARS: int = 3000  # 摘要超过此长度才二次切分
+    # ---- 入库去重 ----
+    INGEST_DEDUP_ENABLED: bool = True
+    INGEST_DEDUP_BY_FILE: bool = True  # 全文哈希相同则跳过（跨文件名）
+    INGEST_DEDUP_BY_CHUNK: bool = True  # 块内容哈希已存在则跳过
     TOP_K: int = 3
-    RETRIEVAL_RECALL_K: int = 16  # 初筛宽召回条数，再交重排
+    RETRIEVAL_RECALL_K: int = 8  # 初筛宽召回（降延迟）
 
     # ---- 重排序 ----
     RERANK_ENABLED: bool = True
-    RERANK_BACKEND: str = "auto"  # auto | cross_encoder | dense
-    RERANK_MODEL: str = "Xenova/ms-marco-MiniLM-L-6-v2"
-    RERANK_MIN_SCORE: float = 0.35  # 重排后低于此分过滤（cross-encoder 经 sigmoid）
+    RERANK_BACKEND: str = "auto"  # auto | cross_encoder | bge | dense
+    RERANK_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    RERANK_USE_FP16: bool = False  # GPU 可开；CPU 建议 false
+    RERANK_MIN_SCORE: float = 0.35  # 仅 dense 后端参考；CE 排序后按 vector 门禁
 
     # ---- 领域词典 / 向量增强 ----
     DOMAIN_LEXICON_ENABLED: bool = True
@@ -81,24 +92,36 @@ class Settings(BaseSettings):
 
     # ---- 问答置信度兜底 ----
     ANSWER_CONFIDENCE_ENABLED: bool = True
-    ANSWER_CONFIDENCE_THRESHOLD: float = 0.45  # 低于则输出兜底提示
+    ANSWER_CONFIDENCE_THRESHOLD: float = 0.45  # 基于 vector_score
 
     # ---- Agent ----
     FAST_MODE: bool = True
     MAX_REPLAN: int = 0
     MAX_TOOL_RETRY: int = 3
-    MAX_REACT_ITERATIONS: int = 4
+    MAX_REACT_ITERATIONS: int = 2  # 减少重复搜库
+    MAX_KNOWLEDGE_SEARCHES: int = 2  # 单轮问答最多 knowledge_search 次数
+    MAX_REVISE: int = 2  # Critic 未通过时最多再写两轮，达到上限后必须退出
     GROUNDING_THRESHOLD: float = 0.6
+    GROUNDING_FALLBACK_MIN_SUPPORT: float = 0.4  # 达修订上限后的中/低风险分界
+    GROUNDING_MAX_CLAIMS: int = 6  # 论断封顶（合并核验后仍控制 token）
+    GROUNDING_EVIDENCE_CHARS: int = 4000
+    GROUNDING_PER_CLAIM: bool = False  # 默认关：打开会导致深研分钟级
+    GROUNDING_PER_CLAIM_MAX: int = 3
+    CRITIC_RAG_K: int = 3  # WM 证据充足时会自动跳过补检
+    CRITIC_SKIP_RAG_IF_WM: int = 4  # WM facts ≥ 此值则不再搜同一 query
     RETRIEVAL_THRESHOLD: float = 0.55
     PARALLEL_TOOLS: bool = True
     PARALLEL_TOOL_WORKERS: int = 4
+    PARALLEL_RESEARCH: bool = True  # 深研子任务并行（墙钟≈max而非sum）
 
     # ---- MCP ----
     MCP_CLIENT_ENABLED: bool = False
     MCP_SERVERS: str = ""
     MAX_SUBTASKS: int = 6
+    FAST_MAX_SUBTASKS: int = 3  # FAST_MODE 下规划子任务上限
     CHECKPOINT_DIR: str = "data/checkpoints"
     QUERY_REWRITE_ENABLED: bool = False
+    LTM_ASYNC_CONSOLIDATE: bool = True  # 定稿后异步写 LTM，不阻塞返回答案
 
     # ---- 联网搜索 ----
     WEB_SEARCH_PROVIDER: str = "auto"

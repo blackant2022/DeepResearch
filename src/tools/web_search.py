@@ -66,26 +66,44 @@ def _search_tavily(query: str, k: int) -> list[dict]:
 
 
 def _search_duckduckgo(query: str, k: int) -> list[dict]:
-    try:
-        from duckduckgo_search import DDGS
-    except ImportError as e:
-        raise RuntimeError("请安装 duckduckgo-search：pip install duckduckgo-search") from e
-
     region = settings.WEB_SEARCH_REGION or "cn-zh"
     out: list[dict] = []
+    last_err: Exception | None = None
+
+    # 优先新包 ddgs，其次旧包 duckduckgo_search
+    clients = []
     try:
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=k, region=region):
-                out.append({
-                    "title": r.get("title", ""),
-                    "url": r.get("href", ""),
-                    "snippet": (r.get("body") or "")[:800],
-                })
-    except Exception as e:
-        log.warning(f"DuckDuckGo 搜索失败: {e}")
-        raise TimeoutError(f"DuckDuckGo 搜索失败: {e}") from e
-    log.info(f"DuckDuckGo 返回 {len(out)} 条")
-    return out
+        from ddgs import DDGS as DDGSNew  # type: ignore
+        clients.append(("ddgs", DDGSNew))
+    except ImportError:
+        pass
+    try:
+        from duckduckgo_search import DDGS as DDGSOld
+        clients.append(("duckduckgo_search", DDGSOld))
+    except ImportError:
+        pass
+
+    if not clients:
+        raise RuntimeError("请安装 ddgs 或 duckduckgo-search：pip install ddgs")
+
+    for name, DDGS in clients:
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.text(query, max_results=k, region=region):
+                    out.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("href") or r.get("link") or "",
+                        "snippet": (r.get("body") or r.get("snippet") or "")[:800],
+                    })
+            if out:
+                log.info(f"{name} 返回 {len(out)} 条")
+                return out
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            log.warning(f"{name} 搜索失败: {e}")
+            continue
+
+    raise TimeoutError(f"DuckDuckGo 搜索失败: {last_err}")
 
 
 def _search_mock(query: str, k: int) -> list[dict]:

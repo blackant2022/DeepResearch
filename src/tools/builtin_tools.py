@@ -24,15 +24,21 @@ class KnowledgeSearchTool(BaseTool):
     description = "在本地知识库中做语义检索，返回最相关的文档片段（含来源文件名与相关度）。回答具体事实性问题时使用。"
     schema = {
         "query": {"type": "str", "desc": "检索关键词或问题", "required": True},
-        "k": {"type": "int", "desc": "返回条数，默认5", "required": False},
+        "k": {"type": "int", "desc": "返回条数，默认3", "required": False},
     }
 
-    def _run(self, query: str, k: int = 5):
+    def _run(self, query: str, k: int = 3):
         from src.rag.confidence import FALLBACK_MESSAGE
 
+        k = k or settings.TOP_K
         bundle = retriever.search_with_confidence(query, k=k)
         hits = [
-            {"content": h["content"], "source": h["filename"], "score": h["score"]}
+            {
+                "content": h["content"],
+                "source": h["filename"],
+                "score": h.get("vector_score", h.get("score")),
+                "vector_score": h.get("vector_score", h.get("score")),
+            }
             for h in bundle["hits"]
         ]
         # 结构化返回：便于置信度门禁与 Context 压缩；兼容旧 list 消费方

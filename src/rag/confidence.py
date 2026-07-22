@@ -1,11 +1,12 @@
 """
 src/rag/confidence.py — 问答置信度校验与兜底
 
-检索/重排后的相关度低于阈值时，不输出易误导的「编造答案」，
-改为明确兜底提示，引导用户换问法或检查知识库。
+优先使用向量相似度（vector_score），避免 Cross-Encoder sigmoid 分数虚高
+导致域外问题也显示 0.99、门禁失效。
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from config.settings import settings
@@ -19,40 +20,100 @@ FALLBACK_MESSAGE = (
     "3. 若需最新公开信息，可明确要求「联网搜索」。"
 )
 
+# 明显非文献域：即使向量偶发偏高，也强制低置信（知识库路径）
+_OOD = re.compile(
+    r"(天气|气温|下雨|写一首|作诗|写诗|歌词|笑话|量子计算|炒股|比特币|"
+    r"足球比分|电影推荐|今天吃什么|外卖)"
+)
 
-def hits_confidence(hits: list[dict[str, Any]] | None) -> float:
-    """取 Top 命中相关度：优先最高分，其次均值。"""
-    if not hits:
-        return 0.0
-    scores = []
-    for h in hits:
+
+def _hit_score(h: dict[str, Any]) -> float:
+    """置信度打分：优先 vector_score，其次 score。"""
+    for key in ("vector_score", "score"):
         try:
-            scores.append(float(h.get("score") or 0))
+            if h.get(key) is not None:
+                return float(h[key])
         except (TypeError, ValueError):
             continue
+    return 0.0
+
+
+def hits_confidence(hits: list[dict[str, Any]] | None) -> float:
+    """取 Top 命中相关度：0.7×最高 + 0.3×均值。"""
+    if not hits:
+        return 0.0
+    scores = [_hit_score(h) for h in hits]
+    scores = [s for s in scores if s > 0 or s == 0.0]
     if not scores:
         return 0.0
-    # 最高分权重更大，兼顾均值稳定性
     top = max(scores)
     avg = sum(scores) / len(scores)
     return round(0.7 * top + 0.3 * avg, 4)
 
 
-def is_low_confidence(hits: list[dict[str, Any]] | None, threshold: float | None = None) -> bool:
+def query_looks_ood(query: str) -> bool:
+    q = (query or "").strip()
+    if not q:
+        return True
+    if _OOD.search(q):
+        return True
+    try:
+        from src.rag.domain_lexicon import match_terms
+        from src.rag.kb_utils import is_kb_catalog_question, is_kb_knowledge_summary
+
+        if is_kb_catalog_question(q) or is_kb_knowledge_summary(q):
+            return False
+        if match_terms(q):
+            return False
+        lit_keys = (
+            "文献", "论文", "知识库", "文档", "资料", "研究", "遥感", "高光谱",
+            "玉米", "氮", "模型", "方法", "总结", "概述", "反演", "估算",
+            "实验", "精度", "算法", "深度学习", "检索", "光谱", "植被",
+        )
+        if any(k in q for k in lit_keys):
+            return False
+        if len(q) >= 6:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def is_low_confidence(
+    hits: list[dict[str, Any]] | None,
+    threshold: float | None = None,
+    *,
+    query: str = "",
+) -> bool:
     thr = settings.ANSWER_CONFIDENCE_THRESHOLD if threshold is None else threshold
+    if query and query_looks_ood(query):
+        # 域外：向量分也必须很高才过
+        return hits_confidence(hits) < max(thr, 0.80)
     return hits_confidence(hits) < thr
 
 
-def confidence_report(hits: list[dict[str, Any]] | None) -> dict[str, Any]:
+def confidence_report(
+    hits: list[dict[str, Any]] | None,
+    *,
+    query: str = "",
+) -> dict[str, Any]:
     conf = hits_confidence(hits)
     thr = settings.ANSWER_CONFIDENCE_THRESHOLD
-    low = conf < thr
+    ood = bool(query and query_looks_ood(query))
+    effective_thr = max(thr, 0.80) if ood else thr
+    low = conf < effective_thr
+    if ood and conf < 0.85:
+        # 域外且非极高向量分 → 一律兜底
+        low = True
+        effective_thr = max(effective_thr, round(conf + 0.01, 4))
     return {
         "confidence": conf,
-        "threshold": thr,
+        "threshold": effective_thr,
         "pass": not low,
         "hits": len(hits or []),
         "fallback": low,
+        "ood_query": ood,
+        "score_basis": "vector_score",
     }
 
 
@@ -61,12 +122,9 @@ def apply_answer_confidence_gate(
     hits: list[dict[str, Any]] | None,
     *,
     used_knowledge: bool = True,
+    query: str = "",
 ) -> tuple[str, dict[str, Any]]:
-    """
-    若本轮依赖知识库且置信度不足 → 替换为兜底提示。
-    返回 (最终文本, 报告)。
-    """
-    report = confidence_report(hits)
+    report = confidence_report(hits, query=query)
     if not settings.ANSWER_CONFIDENCE_ENABLED:
         report["skipped"] = True
         return answer, report
@@ -96,7 +154,6 @@ def extract_knowledge_hits_from_messages(messages: list[dict[str, Any]] | None) 
         if not isinstance(data, dict) or not data.get("ok"):
             continue
         output = data.get("output")
-        # 新格式：{hits, confidence, ...}
         if isinstance(output, dict) and "hits" in output:
             hits = output.get("hits") or []
             return [h for h in hits if isinstance(h, dict)]

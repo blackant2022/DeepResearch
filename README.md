@@ -1,8 +1,10 @@
-# DeepResearch — 学术文献超级智能体
+# DeepResearch — 学术文献多智能体系统
 
-基于 **LangGraph** 的多 Agent 学术文献研究系统：集成 **RAG 检索增强**、**ReAct 工具调用**、**深度研究子图**、**幻觉治理**与**长期记忆**，支持 PDF / Word 文献入库与交互式问答。
+基于 **LangGraph** 的学术文献研究助手：本地 **RAG**、**Policy ReAct 工具调用**、**深度研究子图**、**双层置信度 / Grounding 幻觉治理**、**长期记忆**，以及可选 **MCP** 远程工具。支持 PDF / DOCX / TXT / MD 入库与 Streamlit 对话。
 
-LLM 直连 [DeepSeek](https://platform.deepseek.com)（OpenAI 兼容协议），向量库使用 **ChromaDB**，嵌入模型 **FastEmbed（BGE 中文）**。
+LLM 直连 [DeepSeek](https://platform.deepseek.com)（OpenAI 兼容协议）。向量库 **ChromaDB**；嵌入 **FastEmbed `BAAI/bge-small-zh-v1.5`**；重排默认 **`BAAI/bge-reranker-v2-m3`**。
+
+给 AI 协作的约束见根目录 [`AGENTS.md`](./AGENTS.md)。
 
 ---
 
@@ -10,13 +12,15 @@ LLM 直连 [DeepSeek](https://platform.deepseek.com)（OpenAI 兼容协议），
 
 | 能力 | 说明 |
 |------|------|
-| 超级智能体 ReAct | LLM 自主决定何时调用知识库检索、目录概览、计算器等工具 |
-| 智能路由 | 自动分流：日常对话 / 超级智能体 / 深度研究 |
-| RAG 知识库 | PDF、DOCX、TXT、Markdown 入库、切分、向量化、语义检索 |
-| 深度研究链 | Planner → Researcher → Writer → Critic 多 Agent 协作 |
-| 幻觉治理 | 生成前约束 + Grounding 事实核验 + 闭环修订 |
-| 双层记忆 | 工作记忆（任务内）+ 长期记忆（Chroma 跨会话） |
-| 工具中间件 | 护栏、指数退避重试、降级 |
+| Workflow 分流 | 长期记忆召回 →（可选）Query 改写 → 多模态 → 路由 |
+| 三路径 | `chat` 闲聊 / `policy` 文献与工具 / `deep_research` 综述管线 |
+| Policy ReAct | **节点内**多轮工具调用（非整图 think↔tools 空转） |
+| RAG | 结构化切块（摘要整块/表Markdown/参考文献处理）+ 语义滑窗、入库去重、宽召回、BGE Rerank |
+| 幻觉治理 | 检索/回答双层门禁 + Critic Grounding（批量核验，默认关 per-claim） |
+| 深度研究 | Planner → Researcher（可并行）→ Writer → Critic ↻ → Consolidate |
+| 记忆 | 工作记忆（可序列化）+ LTM（跨会话；默认定稿后异步写入） |
+| MCP | 可选：按 URL / stdio 接入远程工具（如 MCP Market 百度搜索） |
+| 中间件 | 工具护栏、重试、降级 |
 
 ---
 
@@ -26,89 +30,98 @@ LLM 直连 [DeepSeek](https://platform.deepseek.com)（OpenAI 兼容协议），
 用户问题
   │
   ▼
-recall_memory（长期记忆召回）
-  │
-  ▼
-router（意图路由）
-  ├─ chat            日常对话（快速路径）
-  ├─ super_think     超级智能体 ReAct 环
-  │     ↺ super_tools → super_think（自主调工具）
-  └─ deep_research   深度研究子图
-        plan → research → write → critic ↺ → consolidate
+┌──────────── Workflow（确定性）────────────┐
+│ LTM 召回 → Query 改写(可关) → 多模态 → Router │
+└──────────────────┬───────────────────────┘
+                   │
+       ┌───────────┼───────────┐
+       ▼           ▼           ▼
+     chat       policy    deep_research
+       │      （节点内 ReAct）   │
+       │           │      plan → research → write
+       │           │         → critic ↻ → consolidate
+       └───────────┴───────────┘
+                   ▼
+              返回答案（+ 可选异步写 LTM）
 ```
+
+**设计要点：** 同轮只走一条业务路径；ReAct / 修订环均有硬上限（`MAX_REACT_ITERATIONS`、`MAX_KNOWLEDGE_SEARCHES`、`MAX_REVISE` 等），避免多 Agent 指令冲突与无限循环。
 
 ---
 
 ## 技术栈
 
-- **Python 3.11+**
-- **LangGraph 1.x** — 多 Agent 图编排 + 检查点
-- **ChromaDB** — 向量存储（RAG + 长期记忆）
-- **FastEmbed** — 本地 ONNX 嵌入（`BAAI/bge-small-zh-v1.5`）
-- **OpenAI SDK v2** — 直连 DeepSeek，支持 Function Calling
-- **Streamlit** — 对话前端
-- **Pydantic Settings** — 配置管理
+- Python 3.11+
+- LangGraph 1.x（编排 + 检查点）
+- ChromaDB + FastEmbed + transformers（BGE Reranker）
+- OpenAI SDK v2 → DeepSeek
+- Streamlit / Pydantic Settings
+- 可选：`mcp[cli]`（MCP Client / 自建 Server）
 
 ---
 
 ## 快速开始
 
-### 1. 克隆 & 安装依赖
+### 1. 克隆与依赖
 
 ```bash
 git clone https://github.com/blackant2022/DeepResearch.git
 cd DeepResearch
 pip install -r requirements.txt
+# 使用 MCP / BGE Reranker 时按需安装：
+# pip install "mcp[cli]>=1.0.0" transformers torch
 ```
 
-### 2. 配置 API Key（仅本地 `.env`，不要提交）
+### 2. 配置（勿提交密钥）
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 **`.env`**（已被 `.gitignore` 忽略），填入 Key：
+在 `.env` 填写：
 
 ```env
 DEEPSEEK_API_KEY=你的真实Key
 ```
 
-推送前建议扫描一次：
+推送前建议：
 
 ```bash
 python scripts/check_secrets.py
 ```
 
-> 切勿把真实 Key 写进 `settings.py`、`.env.example`、README 或截图。若 Key 曾进过 Git 历史，请在平台**立即轮换**。
+> 禁止把真实 Key 写进 `settings.py`、`.env.example`、README 或截图。
 
-### 3. 准备文献 & 构建知识库
+### 3. 文献入库
 
-将 PDF / Word / TXT 放入 `data/docs/`，然后：
+将文件放入 `data/docs/`：
 
 ```bash
 python -m src.rag.ingest ./data/docs
 ```
 
+入库支持**结构化切块**（摘要整块、表格转 Markdown、默认丢弃参考文献、过滤页眉页脚）以及**文件级 / 块级哈希去重**（同名覆盖更新）。
+
 ### 4. 运行
 
-**命令行：**
-
 ```bash
+# CLI
 python run_cli.py "知识库里有哪些关于高光谱的研究？"
-```
 
-**Web 界面：**
-
-```bash
+# Web
 streamlit run frontend/streamlit_app.py
 ```
 
-浏览器打开 http://localhost:8501
+浏览器：http://localhost:8501
 
-### 5. 测试
+### 5. 测试与评测
 
 ```bash
 pytest tests/ -v
+
+# 生成 / 使用约 2000 条代理测试集
+python scripts/generate_rag_testset.py --n 2000
+# Rerank A/B、门禁扫参等见 scripts/ 与 data/eval/
 ```
 
 ---
@@ -117,41 +130,51 @@ pytest tests/ -v
 
 ```
 deepresearch-agent/
-├── config/settings.py          # 全局配置（.env）
-├── frontend/streamlit_app.py   # Streamlit 前端
+├── AGENTS.md                 # AI / 协作者约束
+├── config/settings.py        # 配置（读 .env）
+├── frontend/streamlit_app.py
 ├── src/
-│   ├── agents/                 # 各类 Agent（router / super / planner …）
-│   ├── orchestrator/graph.py   # LangGraph 主编排
-│   ├── rag/                    # 入库、检索、幻觉治理
-│   ├── memory/                 # 工作记忆 + 长期记忆
-│   ├── tools/                  # 工具注册表 & 内置工具
-│   ├── middleware/             # 工具调用中间件
-│   └── llm/provider.py         # DeepSeek LLM 入口
+│   ├── agents/               # router / policy / planner / researcher / writer / critic …
+│   ├── orchestrator/         # graph.py + workflow.py
+│   ├── rag/                  # ingest / chunking / retriever / rerank / grounding / confidence
+│   ├── memory/               # 工作记忆 + LTM + embedding
+│   ├── tools/                # 注册表与内置工具
+│   ├── mcp/                  # MCP Server / Client（可选）
+│   ├── middleware/
+│   └── llm/
 ├── data/
-│   ├── docs/                   # 原始文献（本地）
-│   ├── chroma/                 # RAG 向量库（本地生成）
-│   └── ltm_chroma/             # 长期记忆向量库
-├── tests/                      # 冒烟测试
-├── run_cli.py                  # CLI 入口
+│   ├── docs/                 # 原始文献（本地，通常不入库 Git）
+│   ├── chroma/               # RAG 向量库
+│   ├── ltm_chroma/           # 长期记忆
+│   └── eval/                 # 评测集与报告
+├── scripts/                  # 评测、扫参、生成测试集等
+├── docs/                     # 如 MCP_REMOTE_SETUP.md
+├── examples/                 # 示例 Skill 等（非运行时必选）
+├── tests/
+├── run_cli.py
+├── run_mcp_server.py         # 对外暴露本仓库工具的 MCP Server
 └── requirements.txt
 ```
 
 ---
 
-## 环境变量
+## 常用环境变量
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `DEEPSEEK_API_KEY` | — | **必填**，DeepSeek API 密钥 |
-| `LLM_MODEL` | `deepseek-chat` | 模型名称 |
-| `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 嵌入模型 |
-| `MAX_REACT_ITERATIONS` | `8` | 超级智能体最大 ReAct 轮次 |
-| `FAST_MODE` | `true` | 关闭后复杂问题走深度研究链 |
-| `TOP_K` | `3` | RAG 检索条数 |
-| `WEB_SEARCH_PROVIDER` | `auto` | 联网搜索：`auto` / `tavily` / `duckduckgo` / `mock` |
-| `TAVILY_API_KEY` | — | Tavily API Key（可选，[tavily.com](https://tavily.com)） |
+| 变量 | 默认（约） | 说明 |
+|------|------------|------|
+| `DEEPSEEK_API_KEY` | — | **必填** |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-zh-v1.5` | 嵌入 |
+| `RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | 重排 |
+| `TOP_K` / `RETRIEVAL_RECALL_K` | `3` / `8` | 精排条数 / 宽召回 |
+| `RETRIEVAL_THRESHOLD` | `0.55` | 检索门禁（vector_score） |
+| `ANSWER_CONFIDENCE_THRESHOLD` | `0.45` | 回答门禁 |
+| `FAST_MODE` | `true` | 快路径（路由与深研轻量策略） |
+| `MAX_REACT_ITERATIONS` | `2` | Policy 最大轮次 |
+| `QUERY_REWRITE_ENABLED` | `false` | Query 改写 |
+| `MCP_CLIENT_ENABLED` | `false` | 是否注册远程 MCP |
+| `MCP_SERVERS` | `[]` | JSON：`url` 或 `command`+`args` |
 
-完整列表见 `.env.example`。
+完整列表见 [`.env.example`](./.env.example)。远程 MCP 步骤见 [`docs/MCP_REMOTE_SETUP.md`](./docs/MCP_REMOTE_SETUP.md)。
 
 ---
 
@@ -160,34 +183,20 @@ deepresearch-agent/
 | 工具 | 功能 |
 |------|------|
 | `knowledge_search` | 本地知识库语义检索 |
-| `kb_overview` | 列出知识库全部文档 |
-| `calculator` | 安全数学表达式计算 |
-| `web_search` | 联网搜索（Tavily / DuckDuckGo） |
+| `kb_overview` | 知识库文档目录 |
+| `calculator` | 安全表达式计算 |
+| `web_search` | 联网（Tavily / DuckDuckGo·ddgs） |
 
-扩展方式：在 `src/tools/builtin_tools.py` 注册新工具，超级智能体自动获得调用能力。
-
----
-
-## 部署到公网
-
-推荐使用 **Docker + 云服务器**，需挂载 `data/` 目录以持久化知识库。详见项目 Issues 或自行配置：
-
-```bash
-streamlit run frontend/streamlit_app.py \
-  --server.address 0.0.0.0 \
-  --server.port 8501 \
-  --server.headless true
-```
-
-> 公网部署务必做好访问鉴权，避免 API Key 被滥用。
+扩展：在 `src/tools/` 注册，或开启 MCP Client 接入远程工具（自动下发参数 schema）。
 
 ---
 
 ## 设计说明
 
-- **不走 LangChain ChatModel**：避免 langchain + openai 2.x 的 `proxies` 参数兼容问题，直接使用 OpenAI SDK v2。
-- **工作记忆可序列化**：`wm_items` 替代不可序列化的 `WorkingMemory` 对象，兼容 LangGraph 检查点。
-- **工具调用走中间件**：重试、护栏、降级与业务逻辑解耦。
+- **不走 LangChain ChatModel**：直接用 OpenAI SDK v2，减少版本摩擦。
+- **工作记忆可序列化**：`wm_items` 兼容检查点。
+- **置信度用 vector_score**：避免 Rerank CE 分虚高打穿拒答。
+- **Grounding 控成本**：claim 封顶 + 批量核验；`GROUNDING_PER_CLAIM` 默认关闭。
 
 ---
 

@@ -14,7 +14,10 @@ from src.rag.kb_utils import is_kb_catalog_question, is_kb_knowledge_summary
 
 _COMPLEX = re.compile(
     r"(对比|比较|综合分析|深入分析|全面综述|详细阐述|优缺点|多角度|"
-    r"深度研究|分步分析|系统梳理|全面调研)"
+    r"深度研究|分步分析|系统梳理|全面调研|方法与挑战|优劣)"
+)
+_STRONG_DEEP = re.compile(
+    r"(全面综述|系统梳理|全面调研|综合分析|深入分析|多角度|方法与挑战)"
 )
 _WEB = re.compile(r"(上网|联网|搜索|查一下|最新|新闻|天气|今日|今天)")
 
@@ -31,6 +34,10 @@ class RouterAgent(BaseAgent):
         if is_chitchat(q):
             return {"agent": "chat", "reason": "日常对话/身份/寒暄"}
 
+        # 复杂综述优先深研，避免被「知识总结」规则截走
+        if self._needs_deep_research(q):
+            return {"agent": "deep_research", "reason": "复杂研究任务"}
+
         if is_kb_catalog_question(q):
             return {"agent": "super", "reason": "知识库文档目录"}
 
@@ -42,9 +49,6 @@ class RouterAgent(BaseAgent):
             if self._looks_like_literature(q) or _WEB.search(q):
                 return {"agent": "super", "reason": "短问直达策略 Agent（快路径）"}
             return {"agent": "super", "reason": "短问默认策略 Agent（快路径）"}
-
-        if self._needs_deep_research(q):
-            return {"agent": "deep_research", "reason": "复杂研究任务"}
 
         if self._looks_like_literature(q):
             return {"agent": "super", "reason": "文献/知识库检索"}
@@ -64,10 +68,11 @@ class RouterAgent(BaseAgent):
         return {"agent": "super", "reason": "默认超级智能体"}
 
     def _needs_deep_research(self, q: str) -> bool:
-        """FAST_MODE 下深研门槛更高：长问 + 复杂意图词。"""
+        """深研门槛：强意图词可略放宽长度；普通复杂词仍要较长。"""
         if settings.FAST_MODE is False:
             return bool(_COMPLEX.search(q)) or len(q) > 80
-        # 快模式：必须同时满足长度与复杂意图，避免误进 4-Agent
+        if _STRONG_DEEP.search(q) and len(q) >= 40:
+            return True
         return len(q) > 80 and bool(_COMPLEX.search(q))
 
     @staticmethod

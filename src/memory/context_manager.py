@@ -19,8 +19,12 @@ class ContextManager:
 
     def prepare_for_policy(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """策略决策前压缩 messages，返回可安全送给 LLM 的副本。"""
+        from src.llm.messages import repair_tool_message_chain
+
         compact = [self._compact_message(m) for m in messages]
-        return self._enforce_budget(compact)
+        # 先修链再压预算，压预算时整组丢弃，避免留下孤儿 tool_calls
+        repaired = repair_tool_message_chain(compact)
+        return repair_tool_message_chain(self._enforce_budget(repaired))
 
     def _compact_message(self, msg: dict[str, Any]) -> dict[str, Any]:
         out = dict(msg)
@@ -105,7 +109,10 @@ class ContextManager:
         return text[: self.tool_snippet] + ("…" if len(text) > self.tool_snippet else "")
 
     def _enforce_budget(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """保留 system + 最新 user，压缩中间多余 tool 观察。"""
+        """
+        保留 system + 最新对话；超预算时整组删除最旧的
+        assistant(+tool_calls)+其后 tool 回执，绝不单独删 tool 消息。
+        """
         if not messages:
             return messages
 
@@ -115,17 +122,33 @@ class ContextManager:
         def total(msgs: list[dict]) -> int:
             return sum(len(str(m.get("content") or "")) for m in msgs)
 
+        def drop_oldest_tool_group(msgs: list[dict]) -> bool:
+            """删除最早一段 assistant.tool_calls + 紧随 tool；成功返回 True。"""
+            for i, m in enumerate(msgs):
+                if m.get("role") != "assistant" or not m.get("tool_calls"):
+                    continue
+                # 保留末尾最近一轮（至少留 1 组工具交互 + 后续）
+                j = i + 1
+                while j < len(msgs) and msgs[j].get("role") == "tool":
+                    j += 1
+                # 若这是消息末尾唯一一组，不要删，避免空上下文
+                if i == 0 and j >= len(msgs) - 1:
+                    return False
+                del msgs[i:j]
+                return True
+            return False
+
         while total(system + rest) > self.max_chars and len(rest) > 3:
-            # 优先丢掉最旧的 tool 观测
-            idx = next((i for i, m in enumerate(rest) if m.get("role") == "tool"), None)
-            if idx is None:
-                # 再丢最旧的非 user 前缀
-                if rest and rest[0].get("role") != "user":
-                    rest.pop(0)
-                else:
-                    break
-            else:
-                rest.pop(idx)
+            if drop_oldest_tool_group(rest):
+                continue
+            # 再丢最旧的非 user 前缀（不能是半截 tool）
+            if rest and rest[0].get("role") == "tool":
+                rest.pop(0)
+                continue
+            if rest and rest[0].get("role") != "user":
+                rest.pop(0)
+                continue
+            break
         return system + rest
 
 

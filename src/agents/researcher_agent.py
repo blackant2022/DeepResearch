@@ -1,8 +1,14 @@
 """
 src/agents/researcher_agent.py — 研究员 Agent
+
+速度策略：
+  - 有足够高分证据时跳过「要点」LLM 摘要（Writer 会再综合）
+  - 预检索已覆盖原问时，子任务失败不再用原问重搜
+  - FAST_MODE 下目录预检索减少宽关键词次数
 """
 from __future__ import annotations
 
+from config.settings import settings
 from src.agents.base_agent import BaseAgent
 from src.middleware.pipeline import pipeline
 from src.rag.kb_utils import is_kb_catalog_question, normalize_chunk
@@ -39,7 +45,8 @@ class ResearcherAgent(BaseAgent):
         for d in sources:
             line = f"《{d['filename']}》共{d['chunks']}块，摘要：{d.get('sample', '')}"
             self.wm.add_fact("retriever", line, filename=d["filename"], tag="kb_doc")
-        for kw in _BROAD_KWS:
+        kws = _BROAD_KWS[:2] if settings.FAST_MODE else _BROAD_KWS
+        for kw in kws:
             for hit in retriever.search(kw, k=1):
                 self.wm.add_fact(
                     "retriever", hit["content"], filename=hit["filename"], score=hit["score"]
@@ -55,10 +62,12 @@ class ResearcherAgent(BaseAgent):
             self.wm.add_fact(
                 "retriever", hit["content"], filename=hit["filename"], score=hit["score"]
             )
+        # 标记：原问已预检索，子任务勿再重复用原问重试
+        self.wm.add("retriever", question, kind="scratch", tag="bootstrap_query")
         self.log.info(f"预检索：{len(hits)} 条（query={question[:40]}）")
         return len(hits)
 
-    def execute(self, subtask: dict, question: str) -> dict:
+    def execute(self, subtask: dict, question: str, *, persist: bool = True) -> dict:
         goal = subtask["goal"]
         tool_name = self._resolve_tool(subtask.get("tool", "reason"), question)
         self.log.info(f"执行子任务#{subtask['id']}：{goal} (工具={tool_name})")
@@ -76,12 +85,15 @@ class ResearcherAgent(BaseAgent):
                 tool_note = f"[{tool_name} 失败/{result.error_type}] {result.error}"
 
         finding = self._compose_finding(goal, tool_note, evidence)
-        self.wm.add(self.name, finding, kind="observation", subtask_id=subtask["id"])
+        if persist:
+            self.persist_finding(subtask["id"], finding, evidence)
+        return {"subtask_id": subtask["id"], "finding": finding, "evidence": evidence, "tool_note": tool_note}
+
+    def persist_finding(self, subtask_id: int, finding: str, evidence: list[dict]) -> None:
+        self.wm.add(self.name, finding, kind="observation", subtask_id=subtask_id)
         for ev in evidence:
             self.wm.add_fact("retriever", ev["content"], filename=ev["filename"], score=ev["score"])
-
-        self.say(f"子任务#{subtask['id']} 完成", to="writer")
-        return {"subtask_id": subtask["id"], "finding": finding, "evidence": evidence, "tool_note": tool_note}
+        self.say(f"子任务#{subtask_id} 完成", to="writer")
 
     def _resolve_tool(self, tool_name: str, question: str) -> str:
         if is_kb_catalog_question(question):
@@ -110,7 +122,7 @@ class ResearcherAgent(BaseAgent):
         if tool_name == "knowledge_search":
             hits_list = self._normalize_search_hits(result.output)
             evidence = self._collect_evidence(hits_list)
-            if not evidence and goal != question:
+            if not evidence and goal != question and not self._already_bootstrapped(question):
                 retry = pipeline.invoke(registry.get("knowledge_search"), query=question)
                 if retry.ok:
                     retry_hits = self._normalize_search_hits(retry.output)
@@ -119,6 +131,12 @@ class ResearcherAgent(BaseAgent):
             return evidence, self._format_hits(hits_list)
 
         return [], f"[{tool_name} 成功] {result.output}"
+
+    def _already_bootstrapped(self, question: str) -> bool:
+        for item in self.wm._items:  # noqa: SLF001 — 同模块内轻量标记检查
+            if item.meta.get("tag") == "bootstrap_query" and item.content == question:
+                return True
+        return False
 
     @staticmethod
     def _normalize_search_hits(output) -> list:
@@ -158,6 +176,17 @@ class ResearcherAgent(BaseAgent):
             raw = self._format_hits(
                 [{"content": e["content"], "source": e["filename"], "score": e["score"]} for e in evidence]
             )
+            # FAST：有高分证据时跳过摘要 LLM，Writer 会综合全文
+            thr = float(getattr(settings, "RETRIEVAL_THRESHOLD", 0.55) or 0.55)
+            strong = sum(1 for e in evidence if float(e.get("score") or 0) >= thr)
+            if settings.FAST_MODE and strong >= 1:
+                bullets = []
+                for e in evidence[:3]:
+                    snippet = str(e["content"])[:140].replace("\n", " ")
+                    bullets.append(f"- [{e['filename']}] {snippet}")
+                summary = "检索要点：\n" + "\n".join(bullets)
+                return f"【证据】\n{raw}\n\n【要点】{summary}"
+
             summary = self.think(
                 f"子任务：{goal}\n已检索到以下证据：\n{raw}\n"
                 "请用2-4句话总结关键信息，必须引用上述证据，不可说「无有效信息」。"

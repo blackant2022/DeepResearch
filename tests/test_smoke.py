@@ -2,6 +2,8 @@
 tests/test_smoke.py — 冒烟测试（不需要真实API Key也能测的部分）
 用 pytest 运行：pytest tests/ -v
 """
+import json
+
 from src.tools.builtin_tools import CalculatorTool
 from src.tools.base import registry
 from src.middleware.pipeline import pipeline
@@ -156,6 +158,15 @@ def test_context_manager_compacts_tool_errors():
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "q"},
         {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "1",
+                "type": "function",
+                "function": {"name": "knowledge_search", "arguments": "{}"},
+            }],
+        },
+        {
             "role": "tool",
             "tool_call_id": "1",
             "content": '{"ok": false, "error": "' + ("x" * 500) + '", "error_type": "timeout"}',
@@ -163,6 +174,7 @@ def test_context_manager_compacts_tool_errors():
     ]
     out = cm.prepare_for_policy(msgs)
     tool = out[-1]["content"]
+    assert out[-1]["role"] == "tool"
     assert "timeout" in tool
     assert len(tool) < 400
 
@@ -305,11 +317,34 @@ def test_mcp_schema_from_json():
 
     schema = _schema_from_json({
         "type": "object",
-        "properties": {"query": {"type": "string", "description": "检索词"}},
+        "properties": {
+            "query": {"type": "string", "description": "检索词"},
+            "count": {"type": "integer", "description": "条数"},
+        },
         "required": ["query"],
     })
     assert schema["query"]["required"] is True
     assert schema["query"]["type"] == "str"
+    assert schema["count"]["required"] is False
+    assert schema["count"]["type"] == "int"
+
+
+def test_mcp_parse_url_spec(monkeypatch):
+    from config.settings import settings
+    from src.mcp.client import _parse_server_specs, _transport_kind, _headers_of
+
+    raw = json.dumps([
+        {
+            "url": "https://mcpmarket.cn/mcp/f06475ef3cc0f385b935c5d9",
+            "prefix": "baidu",
+            "token": "secret",
+        }
+    ])
+    monkeypatch.setattr(settings, "MCP_SERVERS", raw)
+    specs = _parse_server_specs()
+    assert len(specs) == 1
+    assert _transport_kind(specs[0]) == "url"
+    assert _headers_of(specs[0])["Authorization"] == "Bearer secret"
 
 
 def test_register_mcp_tools_disabled(monkeypatch):
@@ -408,6 +443,108 @@ def test_build_run_metrics_grounding():
     assert m["primary_pass"] is True
     assert m["rag_eval"]["mode"] == "dual"
     assert m["rag_dual_pass"] is True
+
+
+def test_deep_research_three_tier_fallback(monkeypatch):
+    from config.settings import settings
+    from src.orchestrator.graph import node_safe_fallback, route_after_critic
+
+    monkeypatch.setattr(settings, "MAX_REVISE", 2)
+    monkeypatch.setattr(settings, "GROUNDING_THRESHOLD", 0.6)
+    monkeypatch.setattr(settings, "GROUNDING_FALLBACK_MIN_SUPPORT", 0.4)
+
+    assert route_after_critic({
+        "grounding": {"grounded": True, "support_rate": 0.8},
+        "revise_count": 0,
+    }) == "pass"
+    assert route_after_critic({
+        "grounding": {"grounded": False, "support_rate": 0.5},
+        "revise_count": 1,
+    }) == "revise"
+    assert route_after_critic({
+        "grounding": {"grounded": False, "support_rate": 0.5},
+        "revise_count": 2,
+    }) == "fallback"
+
+    partial = node_safe_fallback({
+        "draft": "最新草稿",
+        "revise_count": 2,
+        "grounding": {
+            "grounded": False,
+            "support_rate": 0.5,
+            "supported": ["结论甲"],
+            "unsupported": ["结论乙"],
+        },
+    })
+    assert partial["grounding"]["fallback_tier"] == "partial"
+    assert "部分证据不足" in partial["final_answer"]
+    assert "最新草稿" in partial["final_answer"]
+
+    insufficient = node_safe_fallback({
+        "draft": "不应返回的完整草稿",
+        "revise_count": 2,
+        "grounding": {
+            "grounded": False,
+            "support_rate": 0.2,
+            "supported": ["唯一有依据的结论"],
+            "unsupported": ["无依据结论"],
+        },
+    })
+    assert insufficient["grounding"]["fallback_tier"] == "insufficient"
+    assert "证据不足" in insufficient["final_answer"]
+    assert "唯一有依据的结论" in insufficient["final_answer"]
+    assert "不应返回的完整草稿" not in insufficient["final_answer"]
+    assert "请上传" in insufficient["final_answer"]
+
+    no_evidence = node_safe_fallback({
+        "draft": "不应返回的完整草稿",
+        "revise_count": 2,
+        "grounding": {
+            "grounded": False,
+            "support_rate": 0.0,
+            "supported": [],
+            "unsupported": ["无依据结论"],
+        },
+    })
+    assert "请上传" in no_evidence["final_answer"]
+    assert "PDF" in no_evidence["final_answer"]
+    assert "实验数据" in no_evidence["final_answer"]
+
+    assert route_after_critic({
+        "grounding": {
+            "grounded": False,
+            "support_rate": 0.0,
+            "claims_total": 0,
+            "no_claims": True,
+            "refusal": True,
+        },
+        "revise_count": 0,
+    }) == "fallback"
+
+
+def test_grounding_refusal_is_not_100_percent(monkeypatch):
+    """纯拒答/无论断不得虚报支撑率 100% 并当作通过。"""
+    from src.rag import grounding as grounding_mod
+
+    refusal = (
+        "知识库中未找到与斑马线视觉检索相关的文献。"
+        "结论：根据现有资料无法确定。"
+    )
+
+    def fake_chat_json(_messages):
+        return {
+            "claims": [
+                {"text": "根据现有资料无法确定斑马线方法", "supported": True},
+                {"text": "未找到相关文献", "supported": True},
+            ]
+        }
+
+    monkeypatch.setattr(grounding_mod.llm, "chat_json", fake_chat_json)
+    report = grounding_mod.grounding_checker.check(refusal, [{"content": "小麦氮素遥感"}])
+    assert report["claims_total"] == 0
+    assert report["grounded"] is False
+    assert report["support_rate"] == 0.0
+    assert report.get("refusal") is True or report.get("no_claims") is True
 
 
 def test_build_run_metrics_retrieval():

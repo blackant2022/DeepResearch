@@ -115,10 +115,13 @@ class LLMProvider:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        """标准对话，返回纯文本。"""
+        """标准对话，返回纯文本。若历史含 tool_calls，先转为纯文本链，避免 400。"""
+        from src.llm.messages import sanitize_for_plain_chat
+
+        safe = sanitize_for_plain_chat(list(messages))
         resp = self.client.chat.completions.create(
             model=self.model,
-            messages=messages,
+            messages=safe,
             temperature=settings.LLM_TEMPERATURE if temperature is None else temperature,
             max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
             stream=False,
@@ -134,9 +137,12 @@ class LLMProvider:
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
         """带 function calling 的对话，返回 assistant 消息结构（含 tool_calls）。"""
+        from src.llm.messages import sanitize_for_tool_chat
+
+        safe = sanitize_for_tool_chat(list(messages))
         resp = self.client.chat.completions.create(
             model=self.model,
-            messages=messages,
+            messages=safe,
             tools=tools or None,
             tool_choice=tool_choice if tools else None,
             temperature=settings.LLM_TEMPERATURE if temperature is None else temperature,

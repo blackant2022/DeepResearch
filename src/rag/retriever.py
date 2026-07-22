@@ -69,35 +69,49 @@ class Retriever:
         )
         candidates = []
         for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0]):
+            vec_score = round(1 - dist / 2, 4)
+            try:
+                weight = float(meta.get("weight", 1.0) or 1.0)
+            except (TypeError, ValueError):
+                weight = 1.0
+            weight = max(0.05, min(1.0, weight))
+            # 低权重块（如保留的参考文献）降权，减少噪声抢占 Top-K
+            adj = round(vec_score * weight, 4)
             candidates.append(
                 {
                     "content": normalize_chunk(doc),
                     "filename": meta.get("filename", "?"),
-                    "score": round(1 - dist / 2, 4),
+                    "section": meta.get("section", "body"),
+                    "weight": weight,
+                    "vector_score": adj,
+                    "score": adj,
+                    "raw_vector_score": vec_score,
                 }
             )
 
         ranked = rerank_hits(
             expanded or query,
             candidates,
-            top_n=k,
-            min_score=settings.RERANK_MIN_SCORE if settings.RERANK_ENABLED else settings.RETRIEVAL_THRESHOLD,
+            top_n=max(k * 2, k),  # 先多取一点再按文件去重压到 k
+            min_score=settings.RETRIEVAL_THRESHOLD,
         )
-        report = confidence_report(ranked)
+        ranked = ranked[:k]
+        report = confidence_report(ranked, query=query)
         log.info(
             f"检索完成 query={query[:36]!r} recall={len(candidates)} "
-            f"out={len(ranked)} conf={report['confidence']:.3f} pass={report['pass']}"
+            f"out={len(ranked)} conf={report['confidence']:.3f} "
+            f"pass={report['pass']} ood={report.get('ood_query')}"
         )
         return ranked
 
     def search_with_confidence(self, query: str, k: int | None = None) -> dict:
         """供工具层使用：hits + 置信度报告。"""
         hits = self.search(query, k=k)
-        report = confidence_report(hits)
+        report = confidence_report(hits, query=query)
         return {
             "hits": hits,
             "confidence": report,
-            "low_confidence": is_low_confidence(hits),
+            "low_confidence": is_low_confidence(hits, query=query),
             "expanded_query": expand_query_text(query),
         }
 

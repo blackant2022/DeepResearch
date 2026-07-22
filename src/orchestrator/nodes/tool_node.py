@@ -24,25 +24,31 @@ def _run_one_tool(tc: dict[str, Any], index: int) -> tuple[int, dict[str, Any], 
     """执行单个工具，返回 (序号, tool_message, trace_item, wm_snippet)。"""
     fn = tc.get("function", {})
     name = fn.get("name", "")
-    args = _parse_args(fn.get("arguments", "{}"))
-    tool = registry.get(name)
-    result = None
+    call_id = tc.get("id") or f"call_{index}"
+    try:
+        args = _parse_args(fn.get("arguments", "{}"))
+        tool = registry.get(name)
+        result = None
 
-    if tool is None:
-        payload = {"ok": False, "error": f"未知工具: {name}"}
-        detail = f"未知工具 {name}"
-    else:
-        result = pipeline.invoke(tool, **args)
-        if result.ok:
-            payload = {"ok": True, "output": result.output}
-            detail = f"{name} 成功 ({result.latency_ms}ms)"
+        if tool is None:
+            payload = {"ok": False, "error": f"未知工具: {name}"}
+            detail = f"未知工具 {name}"
         else:
-            payload = {"ok": False, "error": result.error, "error_type": result.error_type}
-            detail = f"{name} 失败: {result.error}"
+            result = pipeline.invoke(tool, **args)
+            if result.ok:
+                payload = {"ok": True, "output": result.output}
+                detail = f"{name} 成功 ({result.latency_ms}ms)"
+            else:
+                payload = {"ok": False, "error": result.error, "error_type": result.error_type}
+                detail = f"{name} 失败: {result.error}"
+    except Exception as e:  # noqa: BLE001
+        payload = {"ok": False, "error": str(e), "error_type": "runtime"}
+        detail = f"{name or '?'} 异常: {e}"
+        result = None
 
     tool_message = {
         "role": "tool",
-        "tool_call_id": tc.get("id") or f"call_{index}",
+        "tool_call_id": call_id,
         "content": json.dumps(payload, ensure_ascii=False),
     }
     trace_item: dict = {"step": "tool", "detail": detail}
@@ -68,9 +74,7 @@ def _run_one_tool(tc: dict[str, Any], index: int) -> tuple[int, dict[str, Any], 
             meta["retrieval_scores"] = scores
             trace_item["meta"] = meta
 
-    wm_snippet = None
-    if tool is not None:
-        wm_snippet = json.dumps(payload, ensure_ascii=False)[:2000]
+    wm_snippet = json.dumps(payload, ensure_ascii=False)[:2000]
     return index, tool_message, trace_item, wm_snippet
 
 
